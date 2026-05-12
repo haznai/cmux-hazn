@@ -3750,6 +3750,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let windowId: UUID
         let isKeyWindow: Bool
         let isVisible: Bool
+        let frame: NSRect?
+        let level: Int
         let workspaceCount: Int
         let selectedWorkspaceId: UUID?
     }
@@ -6922,6 +6924,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         initialWorkspaceTitle: String? = nil,
         initialWorkingDirectory: String? = nil,
         initialTerminalInput: String? = nil,
+        initialFrame: NSRect? = nil,
+        floating: Bool = false,
         sessionWindowSnapshot: SessionWindowSnapshot? = nil,
         shouldActivate: Bool = true,
         sourceWindow preferredSourceWindow: NSWindow? = nil
@@ -7003,17 +7007,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let shouldTemporarilyDisallowFullScreenTiling =
             sessionWindowSnapshot == nil && sourceWindowIsNativeFullScreen
         let restoredFrame = resolvedWindowFrame(from: sessionWindowSnapshot)
+        let requestedInitialFrame = restoredFrame ?? initialFrame
         let initialRect: NSRect
-        if restoredFrame == nil, let existingFrame {
+        if requestedInitialFrame == nil, let existingFrame {
             // Convert frame rect to content rect so the new window matches the
             // source window's actual size (frame includes titlebar insets).
             initialRect = NSWindow.contentRect(forFrameRect: existingFrame, styleMask: styleMask)
-        } else if let explicitInitialFrame = restoredFrame {
-            initialRect = NSWindow.contentRect(forFrameRect: explicitInitialFrame, styleMask: styleMask)
+        } else if let requestedInitialFrame {
+            initialRect = NSWindow.contentRect(forFrameRect: requestedInitialFrame, styleMask: styleMask)
         } else {
             initialRect = CmuxMainWindow.defaultContentRect(styleMask: styleMask)
         }
-        let frameAutosaveName = mainWindowFrameAutosaveName(windowId: windowId)
+        let frameAutosaveName: NSWindow.FrameAutosaveName =
+            requestedInitialFrame == nil ? mainWindowFrameAutosaveName(windowId: windowId) : ""
 
         let window = CmuxMainWindow(
             contentRect: initialRect,
@@ -7041,14 +7047,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // a movable/resizable window. Empty titlebar drags are routed through
         // WindowDragHandleView instead of background dragging.
         window.isMovable = true
-        let didRegisterFrameAutosaveName = window.setFrameAutosaveName(frameAutosaveName)
+        let didRegisterFrameAutosaveName =
+            !frameAutosaveName.isEmpty && window.setFrameAutosaveName(frameAutosaveName)
         let appKitSavedFrameApplied = didRegisterFrameAutosaveName
-            && restoredFrame == nil
+            && requestedInitialFrame == nil
             && sourceWindow == nil
             && window.setFrameUsingName(frameAutosaveName, force: true)
-        let explicitInitialFrame = restoredFrame
-        if let explicitInitialFrame {
-            window.setFrame(explicitInitialFrame, display: false)
+        if let requestedInitialFrame {
+            window.setFrame(requestedInitialFrame, display: false)
         } else if appKitSavedFrameApplied {
             lastCascadePoint = NSPoint(x: window.frame.minX, y: window.frame.maxY)
         } else if let sourceWindow {
@@ -7069,6 +7075,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // Apply shared window styling.
         attachUpdateAccessory(to: window)
         applyWindowDecorations(to: window)
+        if floating {
+            window.level = .floating
+            window.collectionBehavior.insert(.canJoinAllSpaces)
+            window.collectionBehavior.insert(.fullScreenAuxiliary)
+        }
 
         // Keep a strong reference so the window isn't deallocated.
         let controller = MainWindowController(window: window)
@@ -7109,11 +7120,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 window?.collectionBehavior.remove(.fullScreenDisallowsTiling)
             }
         }
-        if let explicitInitialFrame {
-            window.setFrame(explicitInitialFrame, display: true)
+        if let requestedInitialFrame {
+            window.setFrame(requestedInitialFrame, display: true)
 #if DEBUG
             cmuxDebugLog(
-                "mainWindow.initialFrameApplied source=sessionSnapshot window=\(windowId.uuidString.prefix(8)) " +
+                "mainWindow.initialFrameApplied source=explicit window=\(windowId.uuidString.prefix(8)) " +
                     "applied={\(debugNSRectDescription(window.frame))}"
             )
 #endif

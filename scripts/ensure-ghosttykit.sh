@@ -58,12 +58,6 @@ if [[ ! -d "$PROJECT_DIR/ghostty" ]]; then
   exit 1
 fi
 
-if ! command -v zig >/dev/null 2>&1; then
-  echo "Error: zig is not installed." >&2
-  echo "Install via: brew install zig" >&2
-  exit 1
-fi
-
 if [[ ! -f "$PROJECT_DIR/ghostty/include/ghostty.h" ]]; then
   echo "error: ghostty/include/ghostty.h is missing. Run ./scripts/setup.sh first." >&2
   exit 1
@@ -216,6 +210,11 @@ else
   elif try_fetch_prebuilt_xcframework; then
     echo "==> Seeding cache from prebuilt GhosttyKit.xcframework"
   else
+    if ! command -v zig >/dev/null 2>&1; then
+      echo "Error: zig is required to build GhosttyKit locally because no verified prebuilt archive was available." >&2
+      echo "Install zig or unset CMUX_GHOSTTYKIT_NO_PREBUILT so the verified prebuilt path can be used." >&2
+      exit 1
+    fi
     echo "==> Building GhosttyKit.xcframework (this may take a few minutes)..."
     (
       cd ghostty

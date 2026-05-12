@@ -2702,22 +2702,109 @@ struct CMUXCLI {
             }
 
         case "new-window":
-            let response = try sendV1Command("new_window", client: client)
-            print(response)
+            let floating = commandArgs.contains("--floating") || commandArgs.contains("--always-on-top")
+            let noFocus = commandArgs.contains("--no-focus")
+            let argsWithoutBoolFlags = commandArgs.filter {
+                $0 != "--floating" && $0 != "--always-on-top" && $0 != "--no-focus"
+            }
+            let (commandOpt, rem0) = parseOption(argsWithoutBoolFlags, name: "--command")
+            let (cwdOpt, rem1) = parseOption(rem0, name: "--cwd")
+            let (nameOpt, rem2) = parseOption(rem1, name: "--name")
+            let (frameOpt, rem3) = parseOption(rem2, name: "--frame")
+            let (appKitFrameOpt, rem4) = parseOption(rem3, name: "--appkit-frame")
+            let (positionOpt, rem5) = parseOption(rem4, name: "--position")
+            let (sizeOpt, rem6) = parseOption(rem5, name: "--size")
+            let (focusOpt, remaining) = parseOption(rem6, name: "--focus")
+            let argsBeforeTerminator = Array(remaining.prefix { $0 != "--" })
+            if let unknown = argsBeforeTerminator.first(where: { $0.hasPrefix("--") }) {
+                throw CLIError(message: "new-window: unknown flag '\(unknown)'. Known flags: --name <title>, --command <text>, --cwd <path>, --frame <x,y,w,h>, --position <x,y>, --size <w,h>, --floating, --focus <true|false>, --no-focus")
+            }
+            let trailingCommand: String? = {
+                guard let terminator = remaining.firstIndex(of: "--") else { return nil }
+                let commandParts = remaining.dropFirst(terminator + 1)
+                guard !commandParts.isEmpty else { return nil }
+                return commandParts.joined(separator: " ")
+            }()
+            if noFocus, focusOpt != nil {
+                throw CLIError(message: "new-window: use either --no-focus or --focus, not both")
+            }
+
+            var params: [String: Any] = [:]
+            if let cwdOpt {
+                params["cwd"] = resolvePath(cwdOpt)
+            }
+            if let nameOpt {
+                params["title"] = nameOpt
+            }
+            if let commandText = commandOpt ?? trailingCommand {
+                params["initial_input"] = commandText + "\r"
+            }
+            if floating {
+                params["floating"] = true
+            }
+            if noFocus {
+                params["focus"] = false
+            } else {
+                try applyFocusOption(focusOpt, defaultValue: true, to: &params)
+            }
+
+            if let frameOpt, appKitFrameOpt != nil {
+                throw CLIError(message: "new-window: use either --frame or --appkit-frame, not both")
+            }
+            if let rawFrame = appKitFrameOpt ?? frameOpt {
+                let frame = try parseDoubleList(rawFrame, count: 4, optionName: appKitFrameOpt == nil ? "--frame" : "--appkit-frame")
+                params["frame"] = frame.map { String($0) }.joined(separator: ",")
+            }
+            if positionOpt != nil || sizeOpt != nil {
+                guard params["frame"] == nil else {
+                    throw CLIError(message: "new-window: use either --frame or --position/--size, not both")
+                }
+                guard let positionOpt, let sizeOpt else {
+                    throw CLIError(message: "new-window: --position and --size must be used together")
+                }
+                let position = try parseDoubleList(positionOpt, count: 2, optionName: "--position")
+                let size = try parseDoubleList(sizeOpt, count: 2, optionName: "--size")
+                params["x"] = position[0]
+                params["y"] = position[1]
+                params["width"] = size[0]
+                params["height"] = size[1]
+            }
+
+            let response = try client.sendV2(method: "window.create", params: params)
+            if jsonOutput {
+                print(jsonString(formatIDs(response, mode: idFormat)))
+            } else {
+                let windowId = (response["window_ref"] as? String) ?? (response["window_id"] as? String) ?? "unknown"
+                print("OK \(windowId)")
+            }
 
         case "focus-window":
             guard let target = optionValue(commandArgs, name: "--window") else {
                 throw CLIError(message: "focus-window requires --window")
             }
-            let response = try sendV1Command("focus_window \(target)", client: client)
-            print(response)
+            guard let normalizedWindow = try normalizeWindowHandle(target, client: client) else {
+                throw CLIError(message: "Invalid window handle")
+            }
+            let response = try client.sendV2(method: "window.focus", params: ["window_id": normalizedWindow])
+            if jsonOutput {
+                print(jsonString(formatIDs(response, mode: idFormat)))
+            } else {
+                print("OK")
+            }
 
         case "close-window":
             guard let target = optionValue(commandArgs, name: "--window") else {
                 throw CLIError(message: "close-window requires --window")
             }
-            let response = try sendV1Command("close_window \(target)", client: client)
-            print(response)
+            guard let normalizedWindow = try normalizeWindowHandle(target, client: client) else {
+                throw CLIError(message: "Invalid window handle")
+            }
+            let response = try client.sendV2(method: "window.close", params: ["window_id": normalizedWindow])
+            if jsonOutput {
+                print(jsonString(formatIDs(response, mode: idFormat)))
+            } else {
+                print("OK")
+            }
 
         case "move-workspace-to-window":
             guard let workspaceRaw = optionValue(commandArgs, name: "--workspace") else {
@@ -9098,12 +9185,24 @@ struct CMUXCLI {
             """
         case "new-window":
             return """
-            Usage: cmux new-window
+            Usage: cmux new-window [--name <title>] [--cwd <path>] [--command <text>] [--frame <x,y,w,h>] [--position <x,y> --size <w,h>] [--floating] [--focus <true|false>] [--no-focus]
 
-            Create a new window.
+            Create a new scriptable terminal window. Geometry uses macOS global screen coordinates.
+
+            Flags:
+              --name <title>          Initial workspace title
+              --cwd <path>            Initial terminal working directory
+              --command <text>        Type a command into the new terminal and press Enter
+              --frame <x,y,w,h>       Initial window frame
+              --position <x,y>        Initial window origin; requires --size
+              --size <w,h>            Initial window size; requires --position
+              --floating              Keep the window above normal windows
+              --focus <true|false>    Activate/focus the new window (default true)
+              --no-focus              Compatibility alias for --focus false
 
             Example:
-              cmux new-window
+              cmux new-window --floating --frame 900,240,920,560 --name "Pi overlay" --command "pwd"
+              cmux new-window --no-focus --position 900,240 --size 920,560 -- zsh -lc 'date; pwd'
             """
         case "focus-window":
             return """
@@ -10326,6 +10425,20 @@ struct CMUXCLI {
             remaining.append(arg)
         }
         return (value, remaining)
+    }
+
+    func parseDoubleList(_ raw: String, count: Int, optionName: String) throws -> [Double] {
+        let values = raw
+            .split(separator: ",", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard values.count == count else {
+            throw CLIError(message: "\(optionName) expects \(count) comma-separated numbers")
+        }
+        let parsed = values.compactMap(Double.init)
+        guard parsed.count == count else {
+            throw CLIError(message: "\(optionName) expects \(count) comma-separated numbers")
+        }
+        return parsed
     }
 
     private func parseRepeatedOption(_ args: [String], name: String) -> ([String], [String]) {

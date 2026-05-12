@@ -605,7 +605,11 @@ fi
 # Build cmuxd and ensure helper binaries are present (needed for both launch and no-launch).
 CMUXD_SRC="$PWD/cmuxd/zig-out/bin/cmuxd"
 if [[ -d "$PWD/cmuxd" ]]; then
-  (cd "$PWD/cmuxd" && zig build -Doptimize=ReleaseFast)
+  if command -v zig >/dev/null 2>&1; then
+    (cd "$PWD/cmuxd" && zig build -Doptimize=ReleaseFast)
+  else
+    echo "Skipping cmuxd zig build because zig is not installed"
+  fi
 fi
 if [[ -d "$PWD/ghostty" ]]; then
   BIN_DIR="$APP_PATH/Contents/Resources/bin"

@@ -4122,19 +4122,87 @@ class TerminalController {
 
     // MARK: - V2 Window Methods
 
+    private func v2WindowFramePayload(_ frame: NSRect) -> [String: Any] {
+        [
+            "x": Double(frame.origin.x),
+            "y": Double(frame.origin.y),
+            "width": Double(frame.size.width),
+            "height": Double(frame.size.height),
+        ]
+    }
+
+    private func v2WindowInitialFrame(params: [String: Any]) -> (frame: NSRect?, error: V2CallResult?) {
+        if let rawFrame = v2RawString(params, "frame") ?? v2RawString(params, "appkit_frame") {
+            let pieces = rawFrame
+                .split(separator: ",", omittingEmptySubsequences: false)
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard pieces.count == 4,
+                  let x = Double(pieces[0]),
+                  let y = Double(pieces[1]),
+                  let width = Double(pieces[2]),
+                  let height = Double(pieces[3]) else {
+                return (
+                    nil,
+                    .err(code: "invalid_params", message: "frame must be x,y,width,height", data: nil)
+                )
+            }
+            guard width > 0, height > 0 else {
+                return (
+                    nil,
+                    .err(code: "invalid_params", message: "frame width and height must be positive", data: nil)
+                )
+            }
+            return (
+                NSRect(x: x, y: y, width: width, height: height),
+                nil
+            )
+        }
+
+        let x = v2Double(params, "x")
+        let y = v2Double(params, "y")
+        let width = v2Double(params, "width") ?? v2Double(params, "w")
+        let height = v2Double(params, "height") ?? v2Double(params, "h")
+        let anyGeometry = x != nil || y != nil || width != nil || height != nil
+        guard anyGeometry else {
+            return (nil, nil)
+        }
+        guard let x, let y, let width, let height else {
+            return (
+                nil,
+                .err(code: "invalid_params", message: "window geometry requires x, y, width, and height", data: nil)
+            )
+        }
+        guard width > 0, height > 0 else {
+            return (
+                nil,
+                .err(code: "invalid_params", message: "window width and height must be positive", data: nil)
+            )
+        }
+        return (
+            NSRect(x: x, y: y, width: width, height: height),
+            nil
+        )
+    }
+
     private func v2WindowList(params _: [String: Any]) -> V2CallResult {
         let windows = v2MainSync { AppDelegate.shared?.listMainWindowSummaries() } ?? []
         let payload: [[String: Any]] = windows.enumerated().map { index, item in
-            return [
+            var entry: [String: Any] = [
                 "id": item.windowId.uuidString,
                 "ref": v2Ref(kind: .window, uuid: item.windowId),
                 "index": index,
                 "key": item.isKeyWindow,
                 "visible": item.isVisible,
+                "floating": item.level >= NSWindow.Level.floating.rawValue,
+                "level": item.level,
                 "workspace_count": item.workspaceCount,
                 "selected_workspace_id": v2OrNull(item.selectedWorkspaceId?.uuidString),
                 "selected_workspace_ref": v2Ref(kind: .workspace, uuid: item.selectedWorkspaceId)
             ]
+            if let frame = item.frame {
+                entry["frame"] = v2WindowFramePayload(frame)
+            }
+            return entry
         }
         return .ok(["windows": payload])
     }
@@ -4168,18 +4236,60 @@ class TerminalController {
             ])
     }
 
-    private func v2WindowCreate(params _: [String: Any]) -> V2CallResult {
-        guard let windowId = v2MainSync({ AppDelegate.shared?.createMainWindow() }) else {
+    private func v2WindowCreate(params: [String: Any]) -> V2CallResult {
+        let (initialFrame, frameError) = v2WindowInitialFrame(params: params)
+        if let frameError {
+            return frameError
+        }
+
+        let initialWorkspaceTitle = v2OptionalTrimmedRawString(params, "title")
+            ?? v2OptionalTrimmedRawString(params, "name")
+        let initialWorkingDirectory = v2OptionalTrimmedRawString(params, "working_directory")
+            ?? v2OptionalTrimmedRawString(params, "cwd")
+        let initialInput: String? = {
+            if let input = v2RawString(params, "initial_input")
+                ?? v2RawString(params, "initial_terminal_input") {
+                return input
+            }
+            guard let command = v2OptionalTrimmedRawString(params, "initial_command")
+                ?? v2OptionalTrimmedRawString(params, "command") else {
+                return nil
+            }
+            return command.hasSuffix("\n") || command.hasSuffix("\r") ? command : "\(command)\r"
+        }()
+        let shouldActivate = v2FocusAllowed(
+            requested: v2Bool(params, "focus") ?? v2Bool(params, "activate") ?? true
+        )
+        let floating = v2Bool(params, "floating")
+            ?? v2Bool(params, "always_on_top")
+            ?? false
+
+        guard let windowId = v2MainSync({
+            AppDelegate.shared?.createMainWindow(
+                initialWorkspaceTitle: initialWorkspaceTitle,
+                initialWorkingDirectory: initialWorkingDirectory,
+                initialTerminalInput: initialInput,
+                initialFrame: initialFrame,
+                floating: floating,
+                shouldActivate: shouldActivate
+            )
+        }) else {
             return .err(code: "internal_error", message: "Failed to create window", data: nil)
         }
         // The new window should become key, but setActiveTabManager defensively.
         if let tm = v2MainSync({ AppDelegate.shared?.tabManagerFor(windowId: windowId) }) {
             setActiveTabManager(tm)
         }
-        return .ok([
+        var payload: [String: Any] = [
             "window_id": windowId.uuidString,
-            "window_ref": v2Ref(kind: .window, uuid: windowId)
-        ])
+            "window_ref": v2Ref(kind: .window, uuid: windowId),
+            "floating": floating,
+            "activated": shouldActivate,
+        ]
+        if let frame = v2MainSync({ AppDelegate.shared?.mainWindow(for: windowId)?.frame }) {
+            payload["frame"] = v2WindowFramePayload(frame)
+        }
+        return .ok(payload)
     }
 
     private func v2WindowClose(params: [String: Any]) -> V2CallResult {

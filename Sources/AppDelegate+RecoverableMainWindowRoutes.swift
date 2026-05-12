@@ -157,6 +157,8 @@ extension AppDelegate {
                 windowId: snapshot.windowId,
                 isKeyWindow: snapshot.window?.isKeyWindow ?? false,
                 isVisible: snapshot.window?.isVisible ?? false,
+                frame: snapshot.window?.frame,
+                level: snapshot.window?.level.rawValue ?? 0,
                 workspaceCount: snapshot.tabManager.tabs.count,
                 selectedWorkspaceId: snapshot.tabManager.selectedTabId
             )
@@ -167,6 +169,8 @@ extension AppDelegate {
                     windowId: snapshot.windowId,
                     isKeyWindow: snapshot.window?.isKeyWindow ?? false,
                     isVisible: snapshot.window?.isVisible ?? false,
+                    frame: snapshot.window?.frame,
+                    level: snapshot.window?.level.rawValue ?? 0,
                     workspaceCount: snapshot.tabManager.tabs.count,
                     selectedWorkspaceId: snapshot.tabManager.selectedTabId
                 )
