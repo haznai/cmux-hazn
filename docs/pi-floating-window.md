@@ -131,3 +131,13 @@ cmux events \
   --name pi_hazn_shell.closed \
   --no-ack --no-heartbeats --reconnect
 ```
+
+For live verification against a running debug cmux, use the smoke harness:
+
+```bash
+CMUX_SOCKET_PATH=/tmp/cmux-debug-haznfloat.sock ./scripts/smoke-pi-overlay-controls.py
+```
+
+It uses cmux itself as the test probe: create overlay surfaces, read terminal
+screen text with `surface.read_text`, simulate `Ctrl+T`, inspect the event
+stream, and confirm normal overlays do not publish Pi shortcut events.
