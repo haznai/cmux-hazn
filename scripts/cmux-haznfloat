@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [[ -L "$SCRIPT_PATH" ]]; do
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+  LINK_TARGET="$(readlink "$SCRIPT_PATH")"
+  if [[ "$LINK_TARGET" == /* ]]; then
+    SCRIPT_PATH="$LINK_TARGET"
+  else
+    SCRIPT_PATH="$SCRIPT_DIR/$LINK_TARGET"
+  fi
+done
+REPO_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+TAG="haznfloat"
+MODE="full"
+WAIT_SOCKET="20"
+REBUILD=0
+SMOKE=0
+
+usage() {
+  cat <<'EOF'
+Usage: cmux-haznfloat [options]
+
+Open the haznfloat debug cmux with the Pi overlay socket setup:
+  tag: haznfloat
+  mode: full
+  socket: /tmp/cmux-debug-haznfloat.sock
+
+Options:
+  --rebuild      Rebuild the tagged debug app before launch
+  --smoke        Run the Pi overlay controls smoke test after launch
+  --wait <sec>   Wait for the socket. Default: 20
+  -h, --help     Show this help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --rebuild)
+      REBUILD=1
+      shift
+      ;;
+    --smoke)
+      SMOKE=1
+      shift
+      ;;
+    --wait)
+      WAIT_SOCKET="${2:-}"
+      if [[ -z "$WAIT_SOCKET" ]]; then
+        echo "error: --wait requires seconds" >&2
+        exit 1
+      fi
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+APP="$HOME/Library/Developer/Xcode/DerivedData/cmux-${TAG}/Build/Products/Debug/cmux DEV ${TAG}.app"
+SOCKET="/tmp/cmux-debug-${TAG}.sock"
+
+if [[ "$REBUILD" -eq 1 || ! -d "$APP" ]]; then
+  CMUX_SKIP_ZIG_BUILD="${CMUX_SKIP_ZIG_BUILD:-1}" \
+    "$REPO_DIR/scripts/reload.sh" --tag "$TAG" --launch
+else
+  "$REPO_DIR/scripts/launch-tagged-automation.sh" "$TAG" --mode "$MODE" --wait-socket "$WAIT_SOCKET"
+fi
+
+if [[ "$SMOKE" -eq 1 ]]; then
+  CMUX_SOCKET_PATH="$SOCKET" "$REPO_DIR/scripts/smoke-pi-overlay-controls.py"
+fi

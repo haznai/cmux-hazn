@@ -112,6 +112,17 @@ cmux rpc surface.focus '{"workspace_id":"workspace:1","surface_id":"surface:2"}'
 cmux rpc surface.close '{"workspace_id":"workspace:1","surface_id":"surface:2"}'
 ```
 
+For the haznfloat dev setup, launch cmux from anywhere with:
+
+```bash
+cmux-haznfloat
+```
+
+That command opens the tagged debug app with `CMUX_SOCKET_MODE=full`,
+`CMUX_SOCKET_PATH=/tmp/cmux-debug-haznfloat.sock`, and waits for the socket.
+Use `cmux-haznfloat --rebuild` when the app bundle needs to be rebuilt, and
+`cmux-haznfloat --smoke` to run the Pi overlay controls smoke test after launch.
+
 cmux also publishes Pi-specific events when the user triggers the overlay
 shortcuts on an overlay created with `pi_hazn_shell_controls: true`. Ordinary
 cmux terminals and ordinary cmux overlays keep their normal Ctrl key behavior:
