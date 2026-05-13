@@ -195,6 +195,12 @@ struct WorkspaceContentView: View {
         let isSplit = workspace.bonsplitController.allPaneIds.count > 1 ||
             workspace.panels.count > 1
         let usesWorkspacePaneOverlay = TmuxOverlayExperimentSettings.target().usesWorkspacePaneOverlay
+        let overlayLayoutSnapshot = workspace.attachedOverlaySurface == nil
+            ? nil
+            : Self.effectiveTmuxLayoutSnapshot(
+                cachedSnapshot: workspace.tmuxLayoutSnapshot,
+                liveSnapshot: workspace.bonsplitController.layoutSnapshot()
+            )
 
         // Inactive workspaces are kept alive in a ZStack (for state preservation) but their
         // AppKit-backed views can still intercept drags. Disable drop acceptance for them.
@@ -322,8 +328,89 @@ struct WorkspaceContentView: View {
             )
         }
 
-        bonsplitView
+        ZStack(alignment: .topLeading) {
+            bonsplitView
+            attachedOverlaySurfaceView(
+                overlay: workspace.attachedOverlaySurface,
+                appearance: appearance,
+                layoutSnapshot: overlayLayoutSnapshot
+            )
+        }
             .ignoresSafeArea(.container, edges: (isMinimalMode && !isFullScreen) ? .top : [])
+    }
+
+    @ViewBuilder
+    private func attachedOverlaySurfaceView(
+        overlay: WorkspaceAttachedOverlaySurface?,
+        appearance: PanelAppearance,
+        layoutSnapshot: LayoutSnapshot?
+    ) -> some View {
+        if let overlay,
+           let panel = workspace.panels[overlay.id] {
+            GeometryReader { proxy in
+                let anchorRect = Self.tmuxWorkspacePaneOverlayRect(
+                    layoutSnapshot: layoutSnapshot,
+                    paneId: overlay.anchorPaneId
+                )
+                let frame = Self.attachedOverlayFrame(
+                    anchorRect: anchorRect,
+                    containerSize: proxy.size
+                )
+
+                PanelContentView(
+                    panel: panel,
+                    workspaceId: workspace.id,
+                    paneId: overlay.anchorPaneId,
+                    isFocused: isWorkspaceInputActive && overlay.isFocused,
+                    isSelectedInPane: true,
+                    isVisibleInUI: isWorkspaceVisible,
+                    portalPriority: workspacePortalPriority + 100,
+                    isSplit: false,
+                    appearance: appearance,
+                    hasUnreadNotification: false,
+                    onFocus: {
+                        guard isWorkspaceInputActive else { return }
+                        _ = workspace.focusAttachedOverlaySurface(panel.id)
+                    },
+                    onRequestPanelFocus: {
+                        guard isWorkspaceInputActive else { return }
+                        AppDelegate.shared?.noteMainPanelKeyboardFocusIntent(
+                            workspaceId: workspace.id,
+                            panelId: panel.id,
+                            in: NSApp.keyWindow ?? NSApp.mainWindow
+                        )
+                        _ = workspace.focusAttachedOverlaySurface(panel.id)
+                    },
+                    onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) }
+                )
+                .frame(width: frame.width, height: frame.height)
+                .background(Color(nsColor: appearance.backgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(appearance.dividerColor.opacity(0.85), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
+                .position(x: frame.midX, y: frame.midY)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    _ = workspace.focusAttachedOverlaySurface(panel.id)
+                }
+            }
+            .allowsHitTesting(isWorkspaceInputActive)
+            .zIndex(1000)
+        }
+    }
+
+    private static func attachedOverlayFrame(anchorRect: CGRect?, containerSize: CGSize) -> CGRect {
+        let container = CGRect(origin: .zero, size: containerSize)
+        var base = anchorRect ?? container
+        if base.width <= 1 || base.height <= 1 {
+            base = container
+        }
+        let horizontalInset = min(max(base.width * 0.025, 10), 28)
+        let verticalInset = min(max(base.height * 0.035, 10), 28)
+        return base.insetBy(dx: horizontalInset, dy: verticalInset)
     }
 
     private func syncBonsplitNotificationBadges() {

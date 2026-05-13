@@ -7084,6 +7084,12 @@ struct ClosedBrowserPanelRestoreSnapshot {
     let fallbackAnchorPaneId: UUID?
 }
 
+struct WorkspaceAttachedOverlaySurface: Identifiable, Equatable {
+    let id: UUID
+    let anchorPaneId: PaneID
+    var isFocused: Bool
+}
+
 /// Workspace represents a sidebar tab.
 /// Each workspace contains one BonsplitController that manages split panes and nested surfaces.
 @MainActor
@@ -7131,6 +7137,9 @@ final class Workspace: Identifiable, ObservableObject {
     /// Mapping from bonsplit TabID to our Panel instances
     @Published var panels: [UUID: any Panel] = [:]
 
+    /// A script-created surface rendered over an existing pane without mutating the split tree.
+    @Published var attachedOverlaySurface: WorkspaceAttachedOverlaySurface?
+
     /// Subscriptions for panel updates (e.g., browser title changes)
     var panelSubscriptions: [UUID: AnyCancellable] = [:]
 
@@ -7156,6 +7165,9 @@ final class Workspace: Identifiable, ObservableObject {
 
     /// The currently focused pane's panel ID
     var focusedPanelId: UUID? {
+        if let overlay = attachedOverlaySurface, overlay.isFocused, panels[overlay.id] != nil {
+            return overlay.id
+        }
         guard let paneId = bonsplitController.focusedPaneId,
               let tab = bonsplitController.selectedTab(inPane: paneId) else {
             return nil
@@ -10128,6 +10140,97 @@ final class Workspace: Identifiable, ObservableObject {
         return newPanel
     }
 
+    @discardableResult
+    func newOverlayTerminalSurface(
+        overPane paneId: PaneID,
+        focus: Bool = true,
+        workingDirectory: String? = nil,
+        initialCommand: String? = nil,
+        tmuxStartCommand: String? = nil
+    ) -> TerminalPanel? {
+        if let existing = attachedOverlaySurface {
+            _ = closeAttachedOverlaySurface(existing.id, force: true)
+        }
+
+        let sourcePanelId = effectiveSelectedPanelId(inPane: paneId)
+        var inheritedConfig = inheritedTerminalConfig(preferredPanelId: sourcePanelId, inPane: paneId)
+        let requestedInitialCommand = initialCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let explicitInitialCommand = (requestedInitialCommand?.isEmpty == false) ? requestedInitialCommand : nil
+        let remoteTerminalStartupCommand = remoteTerminalStartupCommand()
+        let startupCommand = explicitInitialCommand ?? remoteTerminalStartupCommand
+        if startupCommand != nil {
+            var template = inheritedConfig ?? CmuxSurfaceConfigTemplate()
+            template.waitAfterCommand = true
+            inheritedConfig = template
+        }
+
+        let overlayWorkingDirectory: String? = {
+            if let workingDirectory = workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !workingDirectory.isEmpty {
+                return workingDirectory
+            }
+            if let sourcePanelId,
+               let panelDirectory = panelDirectories[sourcePanelId]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !panelDirectory.isEmpty {
+                return panelDirectory
+            }
+            if let sourcePanelId,
+               let requestedWorkingDirectory = terminalPanel(for: sourcePanelId)?
+                .requestedWorkingDirectory?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !requestedWorkingDirectory.isEmpty {
+                return requestedWorkingDirectory
+            }
+            let workspaceDirectory = currentDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+            return workspaceDirectory.isEmpty ? nil : workspaceDirectory
+        }()
+
+        let newPanel = TerminalPanel(
+            workspaceId: id,
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: inheritedConfig,
+            workingDirectory: overlayWorkingDirectory,
+            portOrdinal: portOrdinal,
+            initialCommand: startupCommand,
+            tmuxStartCommand: tmuxStartCommand
+        )
+        configureTerminalPanel(newPanel)
+        panels[newPanel.id] = newPanel
+        panelTitles[newPanel.id] = newPanel.displayTitle
+        if remoteTerminalStartupCommand != nil {
+            trackRemoteTerminalSurface(newPanel.id)
+        }
+        seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
+
+        attachedOverlaySurface = WorkspaceAttachedOverlaySurface(
+            id: newPanel.id,
+            anchorPaneId: paneId,
+            isFocused: focus
+        )
+        publishCmuxSurfaceCreated(
+            newPanel.id,
+            paneId: paneId,
+            kind: "terminal",
+            origin: "terminal_overlay",
+            focused: focus
+        )
+
+        if focus {
+            bonsplitController.focusPane(paneId)
+            newPanel.focus()
+            DispatchQueue.main.async { [weak newPanel] in
+                newPanel?.focus()
+            }
+        }
+
+        owningTabManager?.scheduleInitialWorkspaceGitMetadataRefreshIfPossible(
+            workspaceId: id,
+            panelId: newPanel.id,
+            reason: "overlaySurfaceCreate"
+        )
+        return newPanel
+    }
+
     private func remoteTerminalStartupCommand() -> String? {
         guard let command = remoteConfiguration?.terminalStartupCommand?
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -10320,6 +10423,68 @@ final class Workspace: Identifiable, ObservableObject {
         installBrowserPanelSubscription(browserPanel)
         browserPanel.setRemoteWorkspaceStatus(browserRemoteWorkspaceStatusSnapshot())
 
+        return browserPanel
+    }
+
+    @discardableResult
+    func newOverlayBrowserSurface(
+        overPane paneId: PaneID,
+        url: URL? = nil,
+        focus: Bool = true,
+        preferredProfileID: UUID? = nil,
+        creationPolicy: BrowserPanelCreationPolicy = .userInitiated
+    ) -> BrowserPanel? {
+        let browserEnabled = BrowserAvailabilitySettings.isEnabled()
+        guard browserEnabled || creationPolicy.permitsCreationWhenBrowserDisabled else {
+            if let url {
+                _ = NSWorkspace.shared.open(url)
+            }
+            return nil
+        }
+
+        if let existing = attachedOverlaySurface {
+            _ = closeAttachedOverlaySurface(existing.id, force: true)
+        }
+
+        let sourcePanelId = effectiveSelectedPanelId(inPane: paneId)
+        let browserPanel = BrowserPanel(
+            workspaceId: id,
+            profileID: resolvedNewBrowserProfileID(
+                preferredProfileID: preferredProfileID,
+                sourcePanelId: sourcePanelId
+            ),
+            initialURL: url,
+            renderInitialNavigation: browserEnabled || creationPolicy != .restoration,
+            proxyEndpoint: remoteProxyEndpoint,
+            isRemoteWorkspace: isRemoteWorkspace,
+            remoteWebsiteDataStoreIdentifier: isRemoteWorkspace ? id : nil
+        )
+        panels[browserPanel.id] = browserPanel
+        panelTitles[browserPanel.id] = browserPanel.displayTitle
+        attachedOverlaySurface = WorkspaceAttachedOverlaySurface(
+            id: browserPanel.id,
+            anchorPaneId: paneId,
+            isFocused: focus
+        )
+        setPreferredBrowserProfileID(browserPanel.profileID)
+        publishBrowserOpenTabSuggestion(for: browserPanel)
+        publishCmuxSurfaceCreated(
+            browserPanel.id,
+            paneId: paneId,
+            kind: "browser",
+            origin: "browser_overlay",
+            focused: focus
+        )
+
+        if focus {
+            bonsplitController.focusPane(paneId)
+            browserPanel.focus()
+            DispatchQueue.main.async { [weak browserPanel] in
+                browserPanel?.focus()
+            }
+        }
+
+        browserPanel.setRemoteWorkspaceStatus(browserRemoteWorkspaceStatusSnapshot())
         return browserPanel
     }
 
@@ -10608,6 +10773,10 @@ final class Workspace: Identifiable, ObservableObject {
     /// Close a panel.
     /// Returns true when a bonsplit tab close request was issued.
     func closePanel(_ panelId: UUID, force: Bool = false) -> Bool {
+        if isAttachedOverlaySurface(panelId) {
+            return closeAttachedOverlaySurface(panelId, force: force)
+        }
+
         if let tabId = surfaceIdFromPanelId(panelId) {
             // Close the tab in bonsplit (this triggers delegate callback)
             return requestCloseTab(tabId, force: force)
@@ -10645,6 +10814,59 @@ final class Workspace: Identifiable, ObservableObject {
         return closed
     }
 
+    func isAttachedOverlaySurface(_ panelId: UUID) -> Bool {
+        attachedOverlaySurface?.id == panelId
+    }
+
+    @discardableResult
+    func focusAttachedOverlaySurface(_ panelId: UUID) -> Bool {
+        guard var overlay = attachedOverlaySurface,
+              overlay.id == panelId,
+              let panel = panels[panelId] else {
+            return false
+        }
+        overlay.isFocused = true
+        attachedOverlaySurface = overlay
+        bonsplitController.focusPane(overlay.anchorPaneId)
+        panel.focus()
+        return true
+    }
+
+    @discardableResult
+    func closeAttachedOverlaySurface(_ panelId: UUID? = nil, force: Bool = false) -> Bool {
+        guard let overlay = attachedOverlaySurface else { return false }
+        if let panelId, panelId != overlay.id { return false }
+        guard panels[overlay.id] != nil else {
+            attachedOverlaySurface = nil
+            return false
+        }
+
+        let overlayPanelId = overlay.id
+        let overlayPanel = panels[overlayPanelId]
+        attachedOverlaySurface = nil
+        discardClosedPanelLifecycleState(
+            panelId: overlayPanelId,
+            tabId: nil,
+            paneId: overlay.anchorPaneId,
+            panel: overlayPanel,
+            origin: "overlay_close",
+            closePanel: true,
+            publishSurfaceClosedEvent: true,
+            clearSurfaceNotifications: true,
+            requestTransferredRemoteCleanup: true,
+            cleanupControllerSurfaceState: true
+        )
+
+        if let selectedPanelId = effectiveSelectedPanelId(inPane: overlay.anchorPaneId),
+           panels[selectedPanelId] != nil {
+            focusPanel(selectedPanelId)
+        } else {
+            bonsplitController.focusPane(overlay.anchorPaneId)
+        }
+        _ = force
+        return true
+    }
+
     func requestCloseTab(_ tabId: TabID, force: Bool) -> Bool {
         if force { forceCloseTabIds.insert(tabId) }
         let closed = bonsplitController.closeTab(tabId); if force && !closed { forceCloseTabIds.remove(tabId) }
@@ -10652,6 +10874,9 @@ final class Workspace: Identifiable, ObservableObject {
     }
 
     func paneId(forPanelId panelId: UUID) -> PaneID? {
+        if let overlay = attachedOverlaySurface, overlay.id == panelId {
+            return overlay.anchorPaneId
+        }
         guard let tabId = surfaceIdFromPanelId(panelId) else { return nil }
         return bonsplitController.allPaneIds.first { paneId in
             bonsplitController.tabs(inPane: paneId).contains(where: { $0.id == tabId })

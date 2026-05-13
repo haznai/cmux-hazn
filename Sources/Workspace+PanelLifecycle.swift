@@ -179,6 +179,9 @@ extension Workspace {
             panel?.close()
         }
 
+        if attachedOverlaySurface?.id == panelId {
+            attachedOverlaySurface = nil
+        }
         panels.removeValue(forKey: panelId)
         untrackRemoteTerminalSurface(panelId)
         pendingRemoteTerminalChildExitSurfaceIds.remove(panelId)

@@ -3138,6 +3138,7 @@ class TerminalController {
                let ws = tabManager.tabs.first(where: { $0.id == wsId }) {
                 let paneUUID = ws.bonsplitController.focusedPaneId?.id
                 let surfaceUUID = ws.focusedPanelId
+                let placement = surfaceUUID.map { ws.isAttachedOverlaySurface($0) ? "overlay" : "split" }
                 focused = [
                     "window_id": v2OrNull(windowId?.uuidString),
                     "window_ref": v2Ref(kind: .window, uuid: windowId),
@@ -3150,6 +3151,7 @@ class TerminalController {
                     "tab_id": v2OrNull(surfaceUUID?.uuidString),
                     "tab_ref": v2TabRef(uuid: surfaceUUID),
                     "surface_type": v2OrNull(surfaceUUID.flatMap { ws.panels[$0]?.panelType.rawValue }),
+                    "placement": v2OrNull(placement),
                     "is_browser_surface": v2OrNull(surfaceUUID.flatMap { ws.panels[$0]?.panelType == .browser })
                 ]
             } else {
@@ -3183,6 +3185,7 @@ class TerminalController {
                         payload["tab_id"] = surfaceId.uuidString
                         payload["tab_ref"] = v2TabRef(uuid: surfaceId)
                         payload["surface_type"] = v2OrNull(ws.panels[surfaceId]?.panelType.rawValue)
+                        payload["placement"] = ws.isAttachedOverlaySurface(surfaceId) ? "overlay" : "split"
                         payload["is_browser_surface"] = v2OrNull(ws.panels[surfaceId]?.panelType == .browser)
                         payload["pane_id"] = v2OrNull(paneUUID?.uuidString)
                         payload["pane_ref"] = v2Ref(kind: .pane, uuid: paneUUID)
@@ -3192,6 +3195,7 @@ class TerminalController {
                         payload["tab_id"] = NSNull()
                         payload["tab_ref"] = NSNull()
                         payload["surface_type"] = NSNull()
+                        payload["placement"] = NSNull()
                         payload["is_browser_surface"] = NSNull()
                         payload["pane_id"] = NSNull()
                         payload["pane_ref"] = NSNull()
@@ -6009,7 +6013,8 @@ class TerminalController {
             let focusedSurfaceId = ws.focusedPanelId
             let panels = orderedPanels(in: ws)
             let surfaces: [[String: Any]] = panels.enumerated().map { index, panel in
-                let paneUUID = paneByPanelId[panel.id]
+                let isAttachedOverlay = ws.isAttachedOverlaySurface(panel.id)
+                let paneUUID = paneByPanelId[panel.id] ?? ws.paneId(forPanelId: panel.id)?.id
                 var item: [String: Any] = [
                     "id": panel.id.uuidString,
                     "ref": v2Ref(kind: .surface, uuid: panel.id),
@@ -6017,6 +6022,7 @@ class TerminalController {
                     "type": panel.panelType.rawValue,
                     "title": ws.panelTitle(panelId: panel.id) ?? panel.displayTitle,
                     "focused": panel.id == focusedSurfaceId,
+                    "placement": isAttachedOverlay ? "overlay" : "split",
                     "pane_id": v2OrNull(paneUUID?.uuidString),
                     "pane_ref": v2Ref(kind: .pane, uuid: paneUUID),
                     "index_in_pane": v2OrNull(indexInPaneByPanelId[panel.id]),
@@ -6064,6 +6070,7 @@ class TerminalController {
             let surfaceId = ws.focusedPanelId ?? orderedPanels(in: ws).first?.id
             let paneId = surfaceId.flatMap { ws.paneId(forPanelId: $0)?.id }
             let windowId = v2ResolveWindowId(tabManager: tabManager)
+            let isAttachedOverlay = surfaceId.map { ws.isAttachedOverlaySurface($0) } ?? false
 
             payload = [
                 "window_id": v2OrNull(windowId?.uuidString),
@@ -6074,7 +6081,8 @@ class TerminalController {
                 "pane_ref": v2Ref(kind: .pane, uuid: paneId),
                 "surface_id": v2OrNull(surfaceId?.uuidString),
                 "surface_ref": v2Ref(kind: .surface, uuid: surfaceId),
-                "surface_type": v2OrNull(surfaceId.flatMap { ws.panels[$0]?.panelType.rawValue })
+                "surface_type": v2OrNull(surfaceId.flatMap { ws.panels[$0]?.panelType.rawValue }),
+                "placement": v2OrNull(surfaceId.map { _ in isAttachedOverlay ? "overlay" : "split" })
             ]
         }
 
@@ -6114,7 +6122,11 @@ class TerminalController {
                 return
             }
 
-            ws.focusPanel(surfaceId)
+            if ws.isAttachedOverlaySurface(surfaceId) {
+                _ = ws.focusAttachedOverlaySurface(surfaceId)
+            } else {
+                ws.focusPanel(surfaceId)
+            }
             result = .ok(["workspace_id": ws.id.uuidString, "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id), "surface_id": surfaceId.uuidString, "surface_ref": v2Ref(kind: .surface, uuid: surfaceId), "window_id": v2OrNull(v2ResolveWindowId(tabManager: tabManager)?.uuidString), "window_ref": v2Ref(kind: .window, uuid: v2ResolveWindowId(tabManager: tabManager))])
         }
         return result
@@ -6309,7 +6321,7 @@ class TerminalController {
                 return
             }
 
-            if ws.panels.count <= 1 {
+            if !ws.isAttachedOverlaySurface(surfaceId), ws.panels.count <= 1 {
                 result = .err(code: "invalid_state", message: "Cannot close the last surface", data: nil)
                 return
             }
@@ -7505,8 +7517,14 @@ class TerminalController {
         guard let tabManager = v2ResolveTabManager(params: params) else {
             return .err(code: "unavailable", message: "TabManager not available", data: nil)
         }
-        guard let directionStr = v2String(params, "direction"),
-              let direction = parseSplitDirection(directionStr) else {
+        let placement = v2String(params, "placement")?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let wantsOverlay = placement == "overlay" ||
+            placement == "attached_overlay" ||
+            placement == "attached-overlay" ||
+            placement == "over_pane" ||
+            placement == "over-pane"
+        let direction = v2String(params, "direction").flatMap(parseSplitDirection)
+        if !wantsOverlay && direction == nil {
             return .err(code: "invalid_params", message: "Missing or invalid direction (left|right|up|down)", data: nil)
         }
 
@@ -7520,8 +7538,6 @@ class TerminalController {
             return v2BrowserDisabledExternalOpenResult(rawURL: urlStr, url: url, tabManager: tabManager)
         }
 
-        let orientation = direction.orientation
-        let insertFirst = direction.insertFirst
         let parsedInitialDivider = v2InitialDividerPosition(params)
         if let error = parsedInitialDivider.error {
             return error
@@ -7536,13 +7552,83 @@ class TerminalController {
             }
             v2MaybeFocusWindow(for: tabManager)
             v2MaybeSelectWorkspace(tabManager, workspace: ws)
-            let requestedPanelId = v2String(params, "surface_id").flatMap(UUID.init(uuidString:))
-            guard let sourcePanelId = requestedPanelId ?? ws.focusedPanelId,
-                  ws.panels[sourcePanelId] != nil else {
+            let requestedPanelId = v2UUID(params, "surface_id")
+            let requestedPaneId = v2UUID(params, "pane_id")
+
+            if wantsOverlay {
+                let anchorPane = requestedPaneId
+                    .flatMap { paneUUID in ws.bonsplitController.allPaneIds.first(where: { $0.id == paneUUID }) }
+                    ?? requestedPanelId.flatMap { ws.paneId(forPanelId: $0) }
+                    ?? ws.attachedOverlaySurface?.anchorPaneId
+                    ?? ws.bonsplitController.focusedPaneId
+                    ?? ws.bonsplitController.allPaneIds.first
+                guard let anchorPane else {
+                    result = .err(code: "not_found", message: "No pane available for overlay", data: nil)
+                    return
+                }
+
+                let newPanelId: UUID?
+                let focus = v2FocusAllowed(requested: v2Bool(params, "focus") ?? false)
+                if panelType == .browser {
+                    newPanelId = ws.newOverlayBrowserSurface(
+                        overPane: anchorPane,
+                        url: url,
+                        focus: focus
+                    )?.id
+                } else {
+                    newPanelId = ws.newOverlayTerminalSurface(
+                        overPane: anchorPane,
+                        focus: focus,
+                        workingDirectory: workingDirectory,
+                        initialCommand: initialCommand,
+                        tmuxStartCommand: tmuxStartCommand
+                    )?.id
+                }
+
+                guard let newPanelId else {
+                    result = .err(code: "internal_error", message: "Failed to create overlay surface", data: nil)
+                    return
+                }
+                let windowId = v2ResolveWindowId(tabManager: tabManager)
+                result = .ok([
+                    "window_id": v2OrNull(windowId?.uuidString),
+                    "window_ref": v2Ref(kind: .window, uuid: windowId),
+                    "workspace_id": ws.id.uuidString,
+                    "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                    "pane_id": anchorPane.id.uuidString,
+                    "pane_ref": v2Ref(kind: .pane, uuid: anchorPane.id),
+                    "surface_id": newPanelId.uuidString,
+                    "surface_ref": v2Ref(kind: .surface, uuid: newPanelId),
+                    "type": panelType.rawValue,
+                    "placement": "overlay"
+                ])
+                return
+            }
+
+            let splitSourcePanelId: UUID? = {
+                if let requestedPanelId, ws.panels[requestedPanelId] != nil {
+                    if ws.isAttachedOverlaySurface(requestedPanelId),
+                       let anchorPane = ws.paneId(forPanelId: requestedPanelId) {
+                        return ws.effectiveSelectedPanelId(inPane: anchorPane)
+                    }
+                    return requestedPanelId
+                }
+                if let overlay = ws.attachedOverlaySurface,
+                   ws.panels[overlay.id] != nil {
+                    return ws.effectiveSelectedPanelId(inPane: overlay.anchorPaneId)
+                }
+                return ws.focusedPanelId
+            }()
+
+            guard let sourcePanelId = splitSourcePanelId,
+                  ws.panels[sourcePanelId] != nil,
+                  let direction else {
                 result = .err(code: "not_found", message: "No source surface to split", data: nil)
                 return
             }
 
+            let orientation = direction.orientation
+            let insertFirst = direction.insertFirst
             let newPanelId: UUID?
             let focus = v2FocusAllowed(requested: v2Bool(params, "focus") ?? false)
             if panelType == .browser {

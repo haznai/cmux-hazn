@@ -3015,12 +3015,14 @@ struct CMUXCLI {
             let workspaceArg = workspaceFromArgsOrEnv(commandArgs, windowOverride: windowId)
             let type = optionValue(commandArgs, name: "--type")
             let direction = optionValue(commandArgs, name: "--direction") ?? "right"
+            let placement = optionValue(commandArgs, name: "--placement")
             let url = optionValue(commandArgs, name: "--url")
             let focusOpt = optionValue(commandArgs, name: "--focus")
             var params: [String: Any] = ["direction": direction]
             let wsId = try normalizeWorkspaceHandle(workspaceArg, client: client)
             if let wsId { params["workspace_id"] = wsId }
             if let type { params["type"] = type }
+            if let placement { params["placement"] = placement }
             if let url { params["url"] = url }
             try applyFocusOption(focusOpt, defaultValue: false, to: &params)
             let payload = try client.sendV2(method: "pane.create", params: params)
@@ -9581,6 +9583,7 @@ struct CMUXCLI {
             Flags:
               --type <terminal|browser>           Pane type (default: terminal)
               --direction <left|right|up|down>    Split direction (default: right)
+              --placement <split|overlay>          Layout placement (default: split)
               --workspace <id|ref>                Target workspace (default: $CMUX_WORKSPACE_ID)
               --url <url>                         URL for browser panes
               --focus <true|false>                Focus the new pane (default: false)
@@ -9588,6 +9591,7 @@ struct CMUXCLI {
             Example:
               cmux new-pane
               cmux new-pane --type browser --direction down --url https://example.com
+              cmux new-pane --placement overlay --focus true --type terminal
             """
         case "new-surface":
             return """
@@ -21062,7 +21066,7 @@ export default function cmuxPiSessionExtension(pi: ExtensionAPI) {
           tree [--all] [--workspace <id|ref|index>]
           top [--all] [--workspace <id|ref|index>] [--processes]
           focus-pane --pane <id|ref> [--workspace <id|ref>]
-          new-pane [--type <terminal|browser>] [--direction <left|right|up|down>] [--workspace <id|ref>] [--url <url>] [--focus <true|false>]
+          new-pane [--type <terminal|browser>] [--placement <split|overlay>] [--direction <left|right|up|down>] [--workspace <id|ref>] [--url <url>] [--focus <true|false>]
           new-surface [--type <terminal|browser>] [--pane <id|ref>] [--workspace <id|ref>] [--url <url>] [--focus <true|false>]
           close-surface [--surface <id|ref>] [--workspace <id|ref>]
           move-surface --surface <id|ref|index> [--pane <id|ref|index>] [--workspace <id|ref|index>] [--window <id|ref|index>] [--before <id|ref|index>] [--after <id|ref|index>] [--index <n>] [--focus <true|false>]
