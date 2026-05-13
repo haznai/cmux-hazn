@@ -55,6 +55,8 @@ enum CmuxSocketEventMapper {
             publishResult(name: "pane.created", category: "pane", method: method, params: params, result: result)
         case "surface.focus":
             break
+        case "surface.background":
+            publishResult(name: "surface.backgrounded", category: "surface", method: method, params: params, result: result)
         case "surface.close":
             break
         case "surface.move":

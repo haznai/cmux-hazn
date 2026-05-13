@@ -346,6 +346,7 @@ struct WorkspaceContentView: View {
         layoutSnapshot: LayoutSnapshot?
     ) -> some View {
         if let overlay,
+           overlay.isVisible,
            let panel = workspace.panels[overlay.id] {
             GeometryReader { proxy in
                 let anchorRect = Self.tmuxWorkspacePaneOverlayRect(
@@ -385,10 +386,10 @@ struct WorkspaceContentView: View {
                 )
                 .frame(width: frame.width, height: frame.height)
                 .background(Color(nsColor: appearance.backgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(appearance.dividerColor.opacity(0.85), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .stroke(Color.black, lineWidth: 1)
                 )
                 .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
                 .position(x: frame.midX, y: frame.midY)

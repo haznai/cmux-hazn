@@ -142,6 +142,7 @@ class TerminalController {
         "workspace.previous",
         "workspace.last",
         "surface.focus",
+        "surface.background",
         "pane.focus",
         "pane.last",
         "file.open",
@@ -2552,6 +2553,8 @@ class TerminalController {
             return v2Result(id: id, self.v2SurfaceCurrent(params: params))
         case "surface.focus":
             return v2Result(id: id, self.v2SurfaceFocus(params: params))
+        case "surface.background":
+            return v2Result(id: id, self.v2SurfaceBackground(params: params))
         case "surface.split":
             return v2Result(id: id, self.v2SurfaceSplit(params: params))
         case "surface.create":
@@ -2947,6 +2950,7 @@ class TerminalController {
             "surface.list",
             "surface.current",
             "surface.focus",
+            "surface.background",
             "surface.split",
             "surface.create",
             "surface.close",
@@ -6014,6 +6018,9 @@ class TerminalController {
             let panels = orderedPanels(in: ws)
             let surfaces: [[String: Any]] = panels.enumerated().map { index, panel in
                 let isAttachedOverlay = ws.isAttachedOverlaySurface(panel.id)
+                let overlayVisible = ws.attachedOverlaySurface?.id == panel.id
+                    ? (ws.attachedOverlaySurface?.isVisible ?? false)
+                    : true
                 let paneUUID = paneByPanelId[panel.id] ?? ws.paneId(forPanelId: panel.id)?.id
                 var item: [String: Any] = [
                     "id": panel.id.uuidString,
@@ -6023,6 +6030,7 @@ class TerminalController {
                     "title": ws.panelTitle(panelId: panel.id) ?? panel.displayTitle,
                     "focused": panel.id == focusedSurfaceId,
                     "placement": isAttachedOverlay ? "overlay" : "split",
+                    "visible": overlayVisible,
                     "pane_id": v2OrNull(paneUUID?.uuidString),
                     "pane_ref": v2Ref(kind: .pane, uuid: paneUUID),
                     "index_in_pane": v2OrNull(indexInPaneByPanelId[panel.id]),
@@ -6128,6 +6136,46 @@ class TerminalController {
                 ws.focusPanel(surfaceId)
             }
             result = .ok(["workspace_id": ws.id.uuidString, "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id), "surface_id": surfaceId.uuidString, "surface_ref": v2Ref(kind: .surface, uuid: surfaceId), "window_id": v2OrNull(v2ResolveWindowId(tabManager: tabManager)?.uuidString), "window_ref": v2Ref(kind: .window, uuid: v2ResolveWindowId(tabManager: tabManager))])
+        }
+        return result
+    }
+
+    private func v2SurfaceBackground(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+
+        var result: V2CallResult = .err(code: "not_found", message: "Overlay surface not found", data: nil)
+        v2MainSync {
+            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+                result = .err(code: "not_found", message: "Workspace not found", data: nil)
+                return
+            }
+
+            let surfaceId = v2UUID(params, "surface_id") ?? ws.attachedOverlaySurface?.id
+            guard let surfaceId,
+                  let overlay = ws.attachedOverlaySurface,
+                  overlay.id == surfaceId,
+                  ws.panels[surfaceId] != nil else {
+                result = .err(code: "not_found", message: "Surface is not an attached overlay", data: nil)
+                return
+            }
+
+            let didBackground = ws.backgroundAttachedOverlaySurface(surfaceId)
+            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            result = .ok([
+                "workspace_id": ws.id.uuidString,
+                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "pane_id": overlay.anchorPaneId.id.uuidString,
+                "pane_ref": v2Ref(kind: .pane, uuid: overlay.anchorPaneId.id),
+                "surface_id": surfaceId.uuidString,
+                "surface_ref": v2Ref(kind: .surface, uuid: surfaceId),
+                "window_id": v2OrNull(windowId?.uuidString),
+                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "placement": "overlay",
+                "visible": false,
+                "backgrounded": didBackground
+            ])
         }
         return result
     }

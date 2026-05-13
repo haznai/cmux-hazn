@@ -7088,6 +7088,7 @@ struct WorkspaceAttachedOverlaySurface: Identifiable, Equatable {
     let id: UUID
     let anchorPaneId: PaneID
     var isFocused: Bool
+    var isVisible: Bool = true
 }
 
 /// Workspace represents a sidebar tab.
@@ -7165,7 +7166,10 @@ final class Workspace: Identifiable, ObservableObject {
 
     /// The currently focused pane's panel ID
     var focusedPanelId: UUID? {
-        if let overlay = attachedOverlaySurface, overlay.isFocused, panels[overlay.id] != nil {
+        if let overlay = attachedOverlaySurface,
+           overlay.isVisible,
+           overlay.isFocused,
+           panels[overlay.id] != nil {
             return overlay.id
         }
         guard let paneId = bonsplitController.focusedPaneId,
@@ -10205,7 +10209,8 @@ final class Workspace: Identifiable, ObservableObject {
         attachedOverlaySurface = WorkspaceAttachedOverlaySurface(
             id: newPanel.id,
             anchorPaneId: paneId,
-            isFocused: focus
+            isFocused: focus,
+            isVisible: true
         )
         publishCmuxSurfaceCreated(
             newPanel.id,
@@ -10464,7 +10469,8 @@ final class Workspace: Identifiable, ObservableObject {
         attachedOverlaySurface = WorkspaceAttachedOverlaySurface(
             id: browserPanel.id,
             anchorPaneId: paneId,
-            isFocused: focus
+            isFocused: focus,
+            isVisible: true
         )
         setPreferredBrowserProfileID(browserPanel.profileID)
         publishBrowserOpenTabSuggestion(for: browserPanel)
@@ -10826,9 +10832,32 @@ final class Workspace: Identifiable, ObservableObject {
             return false
         }
         overlay.isFocused = true
+        overlay.isVisible = true
         attachedOverlaySurface = overlay
         bonsplitController.focusPane(overlay.anchorPaneId)
         panel.focus()
+        return true
+    }
+
+    @discardableResult
+    func backgroundAttachedOverlaySurface(_ panelId: UUID? = nil) -> Bool {
+        guard var overlay = attachedOverlaySurface else { return false }
+        if let panelId, panelId != overlay.id { return false }
+        guard panels[overlay.id] != nil else {
+            attachedOverlaySurface = nil
+            return false
+        }
+
+        overlay.isFocused = false
+        overlay.isVisible = false
+        attachedOverlaySurface = overlay
+
+        if let selectedPanelId = effectiveSelectedPanelId(inPane: overlay.anchorPaneId),
+           panels[selectedPanelId] != nil {
+            focusPanel(selectedPanelId)
+        } else {
+            bonsplitController.focusPane(overlay.anchorPaneId)
+        }
         return true
     }
 

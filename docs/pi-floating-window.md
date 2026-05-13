@@ -1,4 +1,4 @@
-# Pi floating terminal window
+# Pi floating terminal and attached overlay surfaces
 
 This fork adds a small primitive for Pi-style workflows: create a real cmux/Ghostty
 terminal window from the CLI/socket, place it explicitly, optionally keep it
@@ -72,3 +72,61 @@ For Pi, keep the integration thin:
 
 That gives the user a real shell at any time while keeping enough structured
 state for Pi or an agent to steer it.
+
+## Attached overlay surfaces
+
+For the `pi-hazn-shell` workflow, the preferred primitive is an attached overlay
+surface rather than a separate native floating window. It is still a real cmux
+terminal or browser, but it is drawn over the active pane and belongs to that
+cmux workspace. It does not mutate the split tree.
+
+```bash
+cmux rpc pane.create '{
+  "workspace_id": "workspace:1",
+  "type": "terminal",
+  "placement": "overlay",
+  "initial_command": "zsh -lic '\''hunk; exec zsh -l'\''",
+  "focus": true
+}'
+
+cmux rpc pane.create '{
+  "workspace_id": "workspace:1",
+  "type": "browser",
+  "placement": "overlay",
+  "url": "https://example.com",
+  "focus": true
+}'
+```
+
+The overlay has a 1 px black border. Browser overlays use the regular cmux
+browser panel, including the always-visible address bar.
+
+The Pi bridge can steer the overlay with standard socket methods:
+
+```bash
+cmux rpc surface.read_text '{"workspace_id":"workspace:1","surface_id":"surface:2","lines":80}'
+cmux rpc browser.snapshot '{"workspace_id":"workspace:1","surface_id":"surface:2","compact":true}'
+cmux rpc surface.send_text '{"workspace_id":"workspace:1","surface_id":"surface:2","text":"echo hi\n"}'
+cmux rpc surface.background '{"workspace_id":"workspace:1","surface_id":"surface:2"}'
+cmux rpc surface.focus '{"workspace_id":"workspace:1","surface_id":"surface:2"}'
+cmux rpc surface.close '{"workspace_id":"workspace:1","surface_id":"surface:2"}'
+```
+
+cmux also publishes Pi-specific events when the user triggers the overlay
+shortcuts:
+
+| Shortcut | Event | Effect |
+| --- | --- | --- |
+| `Ctrl+T` | `pi_hazn_shell.transfer_requested` | Pi reads the terminal/browser state and transfers it to the agent; the overlay stays open. |
+| `Ctrl+B` | `pi_hazn_shell.backgrounded` | cmux hides the overlay and keeps the process/browser alive. |
+| `Ctrl+Q` | `pi_hazn_shell.closed` | cmux closes the overlay surface. |
+
+Pi subscribes with:
+
+```bash
+cmux events \
+  --name pi_hazn_shell.transfer_requested \
+  --name pi_hazn_shell.backgrounded \
+  --name pi_hazn_shell.closed \
+  --no-ack --no-heartbeats --reconnect
+```

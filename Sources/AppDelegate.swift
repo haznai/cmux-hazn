@@ -11066,6 +11066,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
+        if handlePiHaznOverlayShortcut(
+            event: event,
+            chars: chars,
+            normalizedFlags: normalizedFlags,
+            commandPaletteEffectiveInTargetWindow: commandPaletteEffectiveInTargetWindow
+        ) {
+            return true
+        }
+
         // When the terminal has active IME composition (e.g. Korean, Japanese, Chinese
         // input), don't intercept non-Cmd key events — let them flow through to the
         // input method. Cmd-based shortcuts (Cmd+T, Cmd+Shift+L, etc.) should still
@@ -12694,6 +12703,113 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return window.windowNumber
         }
         return event.windowNumber > 0 ? event.windowNumber : nil
+    }
+
+    private enum PiHaznOverlayShortcutAction {
+        case transfer
+        case background
+        case close
+
+        var eventName: String {
+            switch self {
+            case .transfer: return "pi_hazn_shell.transfer_requested"
+            case .background: return "pi_hazn_shell.backgrounded"
+            case .close: return "pi_hazn_shell.closed"
+            }
+        }
+
+        var actionName: String {
+            switch self {
+            case .transfer: return "transfer"
+            case .background: return "background"
+            case .close: return "close"
+            }
+        }
+
+        var shortcut: String {
+            switch self {
+            case .transfer: return "ctrl+t"
+            case .background: return "ctrl+b"
+            case .close: return "ctrl+q"
+            }
+        }
+    }
+
+    private func piHaznOverlayShortcutAction(event: NSEvent, chars: String, normalizedFlags: NSEvent.ModifierFlags) -> PiHaznOverlayShortcutAction? {
+        guard normalizedFlags == .control else { return nil }
+        let lowered = chars.lowercased()
+        if lowered == "t" || event.characters == "\u{14}" || event.keyCode == 17 {
+            return .transfer
+        }
+        if lowered == "b" || event.characters == "\u{02}" || event.keyCode == 11 {
+            return .background
+        }
+        if lowered == "q" || event.characters == "\u{11}" || event.keyCode == 12 {
+            return .close
+        }
+        return nil
+    }
+
+    private func handlePiHaznOverlayShortcut(
+        event: NSEvent,
+        chars: String,
+        normalizedFlags: NSEvent.ModifierFlags,
+        commandPaletteEffectiveInTargetWindow: Bool
+    ) -> Bool {
+        guard !commandPaletteEffectiveInTargetWindow,
+              let action = piHaznOverlayShortcutAction(
+                event: event,
+                chars: chars,
+                normalizedFlags: normalizedFlags
+              ),
+              let context = preferredMainWindowContextForShortcuts(event: event),
+              let workspaceId = context.tabManager.selectedTabId,
+              let workspace = context.tabManager.tabs.first(where: { $0.id == workspaceId }),
+              let overlay = workspace.attachedOverlaySurface,
+              overlay.isVisible,
+              overlay.isFocused,
+              let panel = workspace.panels[overlay.id] else {
+            return false
+        }
+
+        func publish(visible: Bool, handled: Bool) {
+            CmuxEventBus.shared.publish(
+                name: action.eventName,
+                category: "pi_hazn_shell",
+                source: "keyboard.overlay",
+                workspaceId: workspace.id.uuidString,
+                surfaceId: overlay.id.uuidString,
+                paneId: overlay.anchorPaneId.id.uuidString,
+                windowId: context.windowId.uuidString,
+                payload: [
+                    "action": action.actionName,
+                    "shortcut": action.shortcut,
+                    "workspace_id": workspace.id.uuidString,
+                    "surface_id": overlay.id.uuidString,
+                    "pane_id": overlay.anchorPaneId.id.uuidString,
+                    "window_id": context.windowId.uuidString,
+                    "surface_type": panel.panelType.rawValue,
+                    "placement": "overlay",
+                    "visible": visible,
+                    "focused": visible && action.actionName != "background",
+                    "handled": handled
+                ]
+            )
+        }
+
+        switch action {
+        case .transfer:
+            publish(visible: true, handled: true)
+            return true
+        case .background:
+            let handled = workspace.backgroundAttachedOverlaySurface(overlay.id)
+            publish(visible: false, handled: handled)
+            return handled
+        case .close:
+            let handled = workspace.closeAttachedOverlaySurface(overlay.id, force: true)
+            publish(visible: false, handled: handled)
+            return handled
+        }
     }
 
     private func armConfiguredShortcutChordIfNeeded(
