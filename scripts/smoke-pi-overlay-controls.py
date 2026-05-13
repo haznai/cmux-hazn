@@ -162,6 +162,34 @@ def visible_orphan_terminal_count():
     return int(totals.get("visible_orphan_terminal_subview_count") or 0)
 
 
+def visible_terminal_count():
+    payload = run_rpc("debug.portal.stats", {})
+    totals = payload.get("totals", {})
+    return int(totals.get("visible_terminal_subview_count") or 0)
+
+
+def wait_visible_terminal_count_at_most(limit, timeout=3):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        last = visible_terminal_count()
+        if last <= limit:
+            return last
+        time.sleep(0.1)
+    die(f"visible terminal portal count stayed above {limit}; last count was {last}")
+
+
+def wait_visible_terminal_count_at_least(limit, timeout=3):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        last = visible_terminal_count()
+        if last >= limit:
+            return last
+        time.sleep(0.1)
+    die(f"visible terminal portal count stayed below {limit}; last count was {last}")
+
+
 def read_text(workspace, surface):
     payload = run_rpc("surface.read_text", {"workspace_id": workspace, "surface_id": surface, "lines": 40})
     return payload.get("text") or ""
@@ -191,6 +219,8 @@ def main():
     workspace = workspace_ref()
     expect(workspace, "no current cmux workspace")
     print(f"workspace={workspace}")
+    baseline_visible_terminals = visible_terminal_count()
+    print(f"baseline_visible_terminals={baseline_visible_terminals}")
 
     pi_surface = None
     normal_surface = None
@@ -199,6 +229,7 @@ def main():
         pi_surface = pi["surface_id"]
         expect(pi.get("pi_hazn_shell_controls") is True, "Pi overlay did not echo pi_hazn_shell_controls=true")
         wait_for_marker(workspace, pi_surface, "PI_SMOKE_READY")
+        wait_visible_terminal_count_at_least(baseline_visible_terminals + 1)
         print(f"pi_overlay={pi_surface} screen_state=ok")
 
         before = latest_event_seq(EVENT_TRANSFER)
@@ -217,8 +248,12 @@ def main():
         expect(backgrounded is not None, "backgrounded Pi overlay disappeared instead of staying pollable")
         expect(backgrounded.get("visible") is False, f"backgrounded Pi overlay still listed as visible: {backgrounded}")
         expect(backgrounded.get("focused") is False, f"backgrounded Pi overlay still listed as focused: {backgrounded}")
+        after_background_visible_terminals = wait_visible_terminal_count_at_most(baseline_visible_terminals)
         expect(visible_orphan_terminal_count() == 0, "Ctrl+B left a visible orphan terminal portal behind")
-        print(f"pi_ctrl_b_event_seq={event.get('seq')} visible=false portal_orphans=0")
+        print(
+            f"pi_ctrl_b_event_seq={event.get('seq')} visible=false "
+            f"visible_terminals={after_background_visible_terminals} portal_orphans=0"
+        )
 
         close_surface(workspace, pi_surface)
         pi_surface = None

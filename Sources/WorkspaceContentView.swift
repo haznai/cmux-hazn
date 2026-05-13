@@ -346,7 +346,6 @@ struct WorkspaceContentView: View {
         layoutSnapshot: LayoutSnapshot?
     ) -> some View {
         if let overlay,
-           overlay.isVisible,
            let panel = workspace.panels[overlay.id] {
             GeometryReader { proxy in
                 let anchorRect = Self.tmuxWorkspacePaneOverlayRect(
@@ -362,9 +361,9 @@ struct WorkspaceContentView: View {
                     panel: panel,
                     workspaceId: workspace.id,
                     paneId: overlay.anchorPaneId,
-                    isFocused: isWorkspaceInputActive && overlay.isFocused,
+                    isFocused: isWorkspaceInputActive && overlay.isVisible && overlay.isFocused,
                     isSelectedInPane: true,
-                    isVisibleInUI: isWorkspaceVisible,
+                    isVisibleInUI: isWorkspaceVisible && overlay.isVisible,
                     portalPriority: workspacePortalPriority + 100,
                     isSplit: false,
                     appearance: appearance,
@@ -392,13 +391,16 @@ struct WorkspaceContentView: View {
                         .stroke(Color.black, lineWidth: 1)
                 )
                 .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
+                .opacity(overlay.isVisible ? 1 : 0)
                 .position(x: frame.midX, y: frame.midY)
                 .contentShape(Rectangle())
                 .onTapGesture {
+                    guard overlay.isVisible else { return }
                     _ = workspace.focusAttachedOverlaySurface(panel.id)
                 }
             }
-            .allowsHitTesting(isWorkspaceInputActive)
+            .allowsHitTesting(isWorkspaceInputActive && overlay.isVisible)
+            .accessibilityHidden(!overlay.isVisible)
             .zIndex(1000)
         }
     }

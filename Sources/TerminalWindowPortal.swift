@@ -1669,7 +1669,9 @@ final class WindowTerminalPortal: NSObject {
         let entryCount: Int
         let hostSubviewCount: Int
         let terminalSubviewCount: Int
+        let visibleTerminalSubviewCount: Int
         let mappedTerminalSubviewCount: Int
+        let visibleMappedTerminalSubviewCount: Int
         let orphanTerminalSubviewCount: Int
         let visibleOrphanTerminalSubviewCount: Int
         let staleEntryCount: Int
@@ -1678,21 +1680,31 @@ final class WindowTerminalPortal: NSObject {
 
     func debugStats() -> DebugStats {
         let terminalSubviews = hostView.subviews.compactMap { $0 as? GhosttySurfaceScrollView }
+        var visibleTerminalSubviewCount = 0
         var mappedTerminalSubviewCount = 0
+        var visibleMappedTerminalSubviewCount = 0
         var orphanTerminalSubviewCount = 0
         var visibleOrphanTerminalSubviewCount = 0
         var visibleInvalidAnchorEntryCount = 0
 
         for hostedView in terminalSubviews {
             let hostedId = ObjectIdentifier(hostedView)
+            let isVisibleTerminalSubview =
+                hostedView.window != nil &&
+                !hostedView.isHidden &&
+                hostedView.frame.width > Self.tinyHideThreshold &&
+                hostedView.frame.height > Self.tinyHideThreshold
+            if isVisibleTerminalSubview {
+                visibleTerminalSubviewCount += 1
+            }
             if entriesByHostedId[hostedId] != nil {
                 mappedTerminalSubviewCount += 1
+                if isVisibleTerminalSubview {
+                    visibleMappedTerminalSubviewCount += 1
+                }
             } else {
                 orphanTerminalSubviewCount += 1
-                if hostedView.window != nil,
-                   !hostedView.isHidden,
-                   hostedView.frame.width > Self.tinyHideThreshold,
-                   hostedView.frame.height > Self.tinyHideThreshold {
+                if isVisibleTerminalSubview {
                     visibleOrphanTerminalSubviewCount += 1
                 }
             }
@@ -1722,7 +1734,9 @@ final class WindowTerminalPortal: NSObject {
             entryCount: entriesByHostedId.count,
             hostSubviewCount: hostView.subviews.count,
             terminalSubviewCount: terminalSubviews.count,
+            visibleTerminalSubviewCount: visibleTerminalSubviewCount,
             mappedTerminalSubviewCount: mappedTerminalSubviewCount,
+            visibleMappedTerminalSubviewCount: visibleMappedTerminalSubviewCount,
             orphanTerminalSubviewCount: orphanTerminalSubviewCount,
             visibleOrphanTerminalSubviewCount: visibleOrphanTerminalSubviewCount,
             staleEntryCount: staleEntryCount,
@@ -2121,7 +2135,9 @@ enum TerminalWindowPortalRegistry {
             "entry_count": 0,
             "host_subview_count": 0,
             "terminal_subview_count": 0,
+            "visible_terminal_subview_count": 0,
             "mapped_terminal_subview_count": 0,
+            "visible_mapped_terminal_subview_count": 0,
             "orphan_terminal_subview_count": 0,
             "visible_orphan_terminal_subview_count": 0,
             "stale_entry_count": 0,
@@ -2147,7 +2163,9 @@ enum TerminalWindowPortalRegistry {
                 "mapped_hosted_count": mappedHostedCount,
                 "host_subview_count": stats.hostSubviewCount,
                 "terminal_subview_count": stats.terminalSubviewCount,
+                "visible_terminal_subview_count": stats.visibleTerminalSubviewCount,
                 "mapped_terminal_subview_count": stats.mappedTerminalSubviewCount,
+                "visible_mapped_terminal_subview_count": stats.visibleMappedTerminalSubviewCount,
                 "orphan_terminal_subview_count": stats.orphanTerminalSubviewCount,
                 "visible_orphan_terminal_subview_count": stats.visibleOrphanTerminalSubviewCount,
                 "stale_entry_count": stats.staleEntryCount,
@@ -2158,7 +2176,9 @@ enum TerminalWindowPortalRegistry {
             totals["entry_count", default: 0] += stats.entryCount
             totals["host_subview_count", default: 0] += stats.hostSubviewCount
             totals["terminal_subview_count", default: 0] += stats.terminalSubviewCount
+            totals["visible_terminal_subview_count", default: 0] += stats.visibleTerminalSubviewCount
             totals["mapped_terminal_subview_count", default: 0] += stats.mappedTerminalSubviewCount
+            totals["visible_mapped_terminal_subview_count", default: 0] += stats.visibleMappedTerminalSubviewCount
             totals["orphan_terminal_subview_count", default: 0] += stats.orphanTerminalSubviewCount
             totals["visible_orphan_terminal_subview_count", default: 0] += stats.visibleOrphanTerminalSubviewCount
             totals["stale_entry_count", default: 0] += stats.staleEntryCount
