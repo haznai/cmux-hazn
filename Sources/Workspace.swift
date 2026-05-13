@@ -10848,7 +10848,7 @@ final class Workspace: Identifiable, ObservableObject {
     func backgroundAttachedOverlaySurface(_ panelId: UUID? = nil) -> Bool {
         guard var overlay = attachedOverlaySurface else { return false }
         if let panelId, panelId != overlay.id { return false }
-        guard panels[overlay.id] != nil else {
+        guard let panel = panels[overlay.id] else {
             attachedOverlaySurface = nil
             return false
         }
@@ -10856,6 +10856,7 @@ final class Workspace: Identifiable, ObservableObject {
         overlay.isFocused = false
         overlay.isVisible = false
         attachedOverlaySurface = overlay
+        hideAttachedOverlayPortalView(panel: panel, reason: "overlayBackground")
 
         if let selectedPanelId = effectiveSelectedPanelId(inPane: overlay.anchorPaneId),
            panels[selectedPanelId] != nil {
@@ -11911,6 +11912,29 @@ final class Workspace: Identifiable, ObservableObject {
         for panel in panels.values {
             guard let browser = panel as? BrowserPanel else { continue }
             browser.hideBrowserPortalView(source: "workspaceRetire")
+        }
+    }
+
+    private func hideAttachedOverlayPortalView(panel: Panel, reason: String) {
+        if let terminal = panel as? TerminalPanel {
+            terminal.unfocus()
+            terminal.hostedView.setVisibleInUI(false)
+            terminal.hostedView.setActive(false)
+            TerminalWindowPortalRegistry.updateEntryVisibility(
+                for: terminal.hostedView,
+                visibleInUI: false
+            )
+            TerminalWindowPortalRegistry.hideHostedView(terminal.hostedView)
+            return
+        }
+
+        if let browser = panel as? BrowserPanel {
+            BrowserWindowPortalRegistry.updateEntryVisibility(
+                for: browser.webView,
+                visibleInUI: false,
+                zPriority: 0
+            )
+            browser.hideBrowserPortalView(source: reason)
         }
     }
 

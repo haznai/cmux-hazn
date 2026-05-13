@@ -9,6 +9,7 @@ import time
 
 
 EVENT_TRANSFER = "pi_hazn_shell.transfer_requested"
+EVENT_BACKGROUND = "pi_hazn_shell.backgrounded"
 
 
 def die(message):
@@ -147,6 +148,20 @@ def close_surface(workspace, surface):
         pass
 
 
+def surface_item(workspace, surface):
+    payload = run_rpc("surface.list", {"workspace_id": workspace})
+    for item in payload.get("surfaces", []):
+        if item.get("id") == surface:
+            return item
+    return None
+
+
+def visible_orphan_terminal_count():
+    payload = run_rpc("debug.portal.stats", {})
+    totals = payload.get("totals", {})
+    return int(totals.get("visible_orphan_terminal_subview_count") or 0)
+
+
 def read_text(workspace, surface):
     payload = run_rpc("surface.read_text", {"workspace_id": workspace, "surface_id": surface, "lines": 40})
     return payload.get("text") or ""
@@ -192,6 +207,18 @@ def main():
         expect(event is not None, "Ctrl+T on Pi overlay did not publish transfer event")
         expect(event.get("surface_id") == pi_surface, f"transfer event was for {event.get('surface_id')}, not {pi_surface}")
         print(f"pi_ctrl_t_event_seq={event.get('seq')}")
+
+        before = latest_event_seq(EVENT_BACKGROUND)
+        run_rpc("debug.shortcut.simulate", {"combo": "ctrl+b"})
+        event = wait_event_after(EVENT_BACKGROUND, before, 3)
+        expect(event is not None, "Ctrl+B on Pi overlay did not publish background event")
+        expect(event.get("surface_id") == pi_surface, f"background event was for {event.get('surface_id')}, not {pi_surface}")
+        backgrounded = surface_item(workspace, pi_surface)
+        expect(backgrounded is not None, "backgrounded Pi overlay disappeared instead of staying pollable")
+        expect(backgrounded.get("visible") is False, f"backgrounded Pi overlay still listed as visible: {backgrounded}")
+        expect(backgrounded.get("focused") is False, f"backgrounded Pi overlay still listed as focused: {backgrounded}")
+        expect(visible_orphan_terminal_count() == 0, "Ctrl+B left a visible orphan terminal portal behind")
+        print(f"pi_ctrl_b_event_seq={event.get('seq')} visible=false portal_orphans=0")
 
         close_surface(workspace, pi_surface)
         pi_surface = None

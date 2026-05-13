@@ -68,9 +68,24 @@ done
 APP="$HOME/Library/Developer/Xcode/DerivedData/cmux-${TAG}/Build/Products/Debug/cmux DEV ${TAG}.app"
 SOCKET="/tmp/cmux-debug-${TAG}.sock"
 
+wait_for_socket() {
+  if [[ "$WAIT_SOCKET" == "0" ]]; then
+    return
+  fi
+
+  local deadline=$((SECONDS + WAIT_SOCKET))
+  while (( SECONDS < deadline )); do
+    if [[ -S "$SOCKET" ]]; then
+      return
+    fi
+    sleep 0.1
+  done
+}
+
 if [[ "$REBUILD" -eq 1 || ! -d "$APP" ]]; then
   CMUX_SKIP_ZIG_BUILD="${CMUX_SKIP_ZIG_BUILD:-1}" \
     "$REPO_DIR/scripts/reload.sh" --tag "$TAG" --launch
+  wait_for_socket
 else
   "$REPO_DIR/scripts/launch-tagged-automation.sh" "$TAG" --mode "$MODE" --wait-socket "$WAIT_SOCKET"
 fi
