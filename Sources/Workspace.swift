@@ -7089,6 +7089,7 @@ struct WorkspaceAttachedOverlaySurface: Identifiable, Equatable {
     let anchorPaneId: PaneID
     var isFocused: Bool
     var isVisible: Bool = true
+    var piHaznShellControls: Bool = false
 }
 
 /// Workspace represents a sidebar tab.
@@ -10150,7 +10151,8 @@ final class Workspace: Identifiable, ObservableObject {
         focus: Bool = true,
         workingDirectory: String? = nil,
         initialCommand: String? = nil,
-        tmuxStartCommand: String? = nil
+        tmuxStartCommand: String? = nil,
+        piHaznShellControls: Bool = false
     ) -> TerminalPanel? {
         if let existing = attachedOverlaySurface {
             _ = closeAttachedOverlaySurface(existing.id, force: true)
@@ -10210,7 +10212,8 @@ final class Workspace: Identifiable, ObservableObject {
             id: newPanel.id,
             anchorPaneId: paneId,
             isFocused: focus,
-            isVisible: true
+            isVisible: true,
+            piHaznShellControls: piHaznShellControls
         )
         publishCmuxSurfaceCreated(
             newPanel.id,
@@ -10437,7 +10440,8 @@ final class Workspace: Identifiable, ObservableObject {
         url: URL? = nil,
         focus: Bool = true,
         preferredProfileID: UUID? = nil,
-        creationPolicy: BrowserPanelCreationPolicy = .userInitiated
+        creationPolicy: BrowserPanelCreationPolicy = .userInitiated,
+        piHaznShellControls: Bool = false
     ) -> BrowserPanel? {
         let browserEnabled = BrowserAvailabilitySettings.isEnabled()
         guard browserEnabled || creationPolicy.permitsCreationWhenBrowserDisabled else {
@@ -10470,7 +10474,8 @@ final class Workspace: Identifiable, ObservableObject {
             id: browserPanel.id,
             anchorPaneId: paneId,
             isFocused: focus,
-            isVisible: true
+            isVisible: true,
+            piHaznShellControls: piHaznShellControls
         )
         setPreferredBrowserProfileID(browserPanel.profileID)
         publishBrowserOpenTabSuggestion(for: browserPanel)

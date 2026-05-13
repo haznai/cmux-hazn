@@ -12766,6 +12766,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
               let workspaceId = context.tabManager.selectedTabId,
               let workspace = context.tabManager.tabs.first(where: { $0.id == workspaceId }),
               let overlay = workspace.attachedOverlaySurface,
+              overlay.piHaznShellControls,
               overlay.isVisible,
               overlay.isFocused,
               let panel = workspace.panels[overlay.id] else {

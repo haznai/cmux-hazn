@@ -113,7 +113,8 @@ cmux rpc surface.close '{"workspace_id":"workspace:1","surface_id":"surface:2"}'
 ```
 
 cmux also publishes Pi-specific events when the user triggers the overlay
-shortcuts:
+shortcuts on an overlay created with `pi_hazn_shell_controls: true`. Ordinary
+cmux terminals and ordinary cmux overlays keep their normal Ctrl key behavior:
 
 | Shortcut | Event | Effect |
 | --- | --- | --- |

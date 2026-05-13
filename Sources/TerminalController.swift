@@ -6039,6 +6039,9 @@ class TerminalController {
                 if let browserPanel = panel as? BrowserPanel {
                     item["developer_tools_visible"] = browserPanel.isDeveloperToolsVisible()
                 }
+                if isAttachedOverlay {
+                    item["pi_hazn_shell_controls"] = ws.attachedOverlaySurface?.piHaznShellControls ?? false
+                }
                 if let terminalPanel = panel as? TerminalPanel {
                     item["requested_working_directory"] = v2OrNull(v2NonEmptyString(terminalPanel.requestedWorkingDirectory))
                     item["initial_command"] = v2OrNull(v2NonEmptyString(terminalPanel.surface.debugInitialCommand()))
@@ -7582,6 +7585,10 @@ class TerminalController {
         let workingDirectory = v2OptionalTrimmedRawString(params, "working_directory")
         let initialCommand = v2OptionalTrimmedRawString(params, "initial_command")
         let tmuxStartCommand = v2OptionalTrimmedRawString(params, "tmux_start_command")
+        let piHaznShellControls = v2Bool(params, "pi_hazn_shell_controls") ??
+            v2Bool(params, "pi_shell_controls") ??
+            v2Bool(params, "capture_pi_hazn_shortcuts") ??
+            false
         if panelType == .browser, BrowserAvailabilitySettings.isDisabled() {
             return v2BrowserDisabledExternalOpenResult(rawURL: urlStr, url: url, tabManager: tabManager)
         }
@@ -7621,7 +7628,8 @@ class TerminalController {
                     newPanelId = ws.newOverlayBrowserSurface(
                         overPane: anchorPane,
                         url: url,
-                        focus: focus
+                        focus: focus,
+                        piHaznShellControls: piHaznShellControls
                     )?.id
                 } else {
                     newPanelId = ws.newOverlayTerminalSurface(
@@ -7629,7 +7637,8 @@ class TerminalController {
                         focus: focus,
                         workingDirectory: workingDirectory,
                         initialCommand: initialCommand,
-                        tmuxStartCommand: tmuxStartCommand
+                        tmuxStartCommand: tmuxStartCommand,
+                        piHaznShellControls: piHaznShellControls
                     )?.id
                 }
 
@@ -7648,7 +7657,8 @@ class TerminalController {
                     "surface_id": newPanelId.uuidString,
                     "surface_ref": v2Ref(kind: .surface, uuid: newPanelId),
                     "type": panelType.rawValue,
-                    "placement": "overlay"
+                    "placement": "overlay",
+                    "pi_hazn_shell_controls": piHaznShellControls
                 ])
                 return
             }
