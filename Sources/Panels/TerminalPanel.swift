@@ -156,6 +156,33 @@ final class TerminalPanel: Panel, ObservableObject {
         hostedView.ensureFocus(for: workspaceId, surfaceId: id)
     }
 
+    func focusAttachedOverlay() {
+        // Attached overlays are not bonsplit tabs, so the normal ensureFocus path
+        // can reject them while checking selected split tabs. Focus the hosted
+        // Ghostty view directly after recording explicit keyboard intent.
+        AppDelegate.shared?.noteTerminalKeyboardFocusIntent(
+            workspaceId: workspaceId,
+            panelId: id,
+            in: hostedView.window
+        )
+        hostedView.setActive(true)
+        guard AppDelegate.shared?.allowsTerminalKeyboardFocus(
+            workspaceId: workspaceId,
+            panelId: id,
+            in: hostedView.window
+        ) != false else {
+            surface.setFocus(false)
+            return
+        }
+        surface.setFocus(true)
+        hostedView.moveFocus()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.surface.setFocus(true)
+            self.hostedView.moveFocus()
+        }
+    }
+
     func unfocus() {
         surface.setFocus(false)
         // Cancel any pending focus work items so an inactive terminal can't steal first responder

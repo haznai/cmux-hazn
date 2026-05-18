@@ -50,6 +50,42 @@ private enum WorkspaceTitlebarInteractionMetrics {
     static let minimalModeTopStripHeight: CGFloat = MinimalModeChromeMetrics.titlebarHeight
 }
 
+private struct AttachedOverlayBorderRepresentable: NSViewRepresentable {
+    func makeNSView(context: Context) -> AttachedOverlayBorderView {
+        AttachedOverlayBorderView()
+    }
+
+    func updateNSView(_ nsView: AttachedOverlayBorderView, context: Context) {
+        nsView.updateBorder()
+    }
+}
+
+private final class AttachedOverlayBorderView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        updateBorder()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+        updateBorder()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    func updateBorder() {
+        layer?.cornerRadius = 4
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.black.cgColor
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.masksToBounds = false
+    }
+}
+
 struct TmuxPaneLayoutPane: Codable, Equatable, Sendable {
     let paneId: String
     let left: Int
@@ -357,39 +393,42 @@ struct WorkspaceContentView: View {
                     containerSize: proxy.size
                 )
 
-                PanelContentView(
-                    panel: panel,
-                    workspaceId: workspace.id,
-                    paneId: overlay.anchorPaneId,
-                    isFocused: isWorkspaceInputActive && overlay.isVisible && overlay.isFocused,
-                    isSelectedInPane: true,
-                    isVisibleInUI: isWorkspaceVisible && overlay.isVisible,
-                    portalPriority: workspacePortalPriority + 100,
-                    isSplit: false,
-                    appearance: appearance,
-                    hasUnreadNotification: false,
-                    onFocus: {
-                        guard isWorkspaceInputActive else { return }
-                        _ = workspace.focusAttachedOverlaySurface(panel.id)
-                    },
-                    onRequestPanelFocus: {
-                        guard isWorkspaceInputActive else { return }
-                        AppDelegate.shared?.noteMainPanelKeyboardFocusIntent(
-                            workspaceId: workspace.id,
-                            panelId: panel.id,
-                            in: NSApp.keyWindow ?? NSApp.mainWindow
-                        )
-                        _ = workspace.focusAttachedOverlaySurface(panel.id)
-                    },
-                    onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) }
-                )
+                ZStack {
+                    PanelContentView(
+                        panel: panel,
+                        workspaceId: workspace.id,
+                        paneId: overlay.anchorPaneId,
+                        isFocused: isWorkspaceInputActive && overlay.isVisible && overlay.isFocused,
+                        isSelectedInPane: true,
+                        isVisibleInUI: isWorkspaceVisible && overlay.isVisible,
+                        portalPriority: workspacePortalPriority + 100,
+                        isSplit: false,
+                        appearance: appearance,
+                        hasUnreadNotification: false,
+                        onFocus: {
+                            guard isWorkspaceInputActive else { return }
+                            _ = workspace.focusAttachedOverlaySurface(panel.id)
+                        },
+                        onRequestPanelFocus: {
+                            guard isWorkspaceInputActive else { return }
+                            AppDelegate.shared?.noteMainPanelKeyboardFocusIntent(
+                                workspaceId: workspace.id,
+                                panelId: panel.id,
+                                in: NSApp.keyWindow ?? NSApp.mainWindow
+                            )
+                            _ = workspace.focusAttachedOverlaySurface(panel.id)
+                        },
+                        onTriggerFlash: { workspace.triggerDebugFlash(panelId: panel.id) }
+                    )
+                    .frame(width: frame.width, height: frame.height)
+                    .background(Color(nsColor: appearance.backgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+                    AttachedOverlayBorderRepresentable()
+                        .frame(width: frame.width, height: frame.height)
+                        .allowsHitTesting(false)
+                }
                 .frame(width: frame.width, height: frame.height)
-                .background(Color(nsColor: appearance.backgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .stroke(Color.black, lineWidth: 1)
-                )
                 .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
                 .opacity(overlay.isVisible ? 1 : 0)
                 .position(x: frame.midX, y: frame.midY)

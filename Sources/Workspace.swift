@@ -10224,11 +10224,7 @@ final class Workspace: Identifiable, ObservableObject {
         )
 
         if focus {
-            bonsplitController.focusPane(paneId)
-            newPanel.focus()
-            DispatchQueue.main.async { [weak newPanel] in
-                newPanel?.focus()
-            }
+            _ = focusAttachedOverlaySurface(newPanel.id)
         }
 
         owningTabManager?.scheduleInitialWorkspaceGitMetadataRefreshIfPossible(
@@ -10488,11 +10484,7 @@ final class Workspace: Identifiable, ObservableObject {
         )
 
         if focus {
-            bonsplitController.focusPane(paneId)
-            browserPanel.focus()
-            DispatchQueue.main.async { [weak browserPanel] in
-                browserPanel?.focus()
-            }
+            _ = focusAttachedOverlaySurface(browserPanel.id)
         }
 
         browserPanel.setRemoteWorkspaceStatus(browserRemoteWorkspaceStatusSnapshot())
@@ -10839,8 +10831,29 @@ final class Workspace: Identifiable, ObservableObject {
         overlay.isFocused = true
         overlay.isVisible = true
         attachedOverlaySurface = overlay
-        bonsplitController.focusPane(overlay.anchorPaneId)
-        panel.focus()
+        // Attached overlays are not bonsplit tabs. Focusing the anchor pane here
+        // re-enters tab selection and can refocus the pane underneath the overlay.
+        AppDelegate.shared?.noteMainPanelKeyboardFocusIntent(
+            workspaceId: id,
+            panelId: panelId,
+            in: NSApp.keyWindow ?? NSApp.mainWindow
+        )
+        if let terminalPanel = panel as? TerminalPanel {
+            terminalPanel.focusAttachedOverlay()
+            DispatchQueue.main.async { [weak terminalPanel] in
+                terminalPanel?.focusAttachedOverlay()
+            }
+        } else if let browserPanel = panel as? BrowserPanel {
+            _ = browserPanel.requestExplicitWebViewFocus()
+            DispatchQueue.main.async { [weak browserPanel] in
+                _ = browserPanel?.requestExplicitWebViewFocus()
+            }
+        } else {
+            panel.focus()
+            DispatchQueue.main.async { [weak panel] in
+                panel?.focus()
+            }
+        }
         return true
     }
 

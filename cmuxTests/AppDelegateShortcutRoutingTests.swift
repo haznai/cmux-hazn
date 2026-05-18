@@ -5232,6 +5232,71 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
 #endif
     }
 
+    func testWindowSendEventRepairsLostFirstResponderForFocusedAttachedOverlayTerminalTyping() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let window = window(withId: windowId),
+              let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let paneId = workspace.bonsplitController.focusedPaneId,
+              let basePanelId = workspace.focusedPanelId,
+              let baseTerminalPanel = workspace.terminalPanel(for: basePanelId),
+              let baseTerminalView = surfaceView(in: baseTerminalPanel.hostedView),
+              let overlayPanel = workspace.newOverlayTerminalSurface(overPane: paneId, focus: true),
+              let overlayTerminalView = surfaceView(in: overlayPanel.hostedView) else {
+            XCTFail("Expected focused base and overlay terminal surfaces")
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        overlayPanel.hostedView.setVisibleInUI(true)
+        overlayPanel.hostedView.setActive(true)
+        XCTAssertTrue(workspace.focusAttachedOverlaySurface(overlayPanel.id))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertEqual(workspace.focusedPanelId, overlayPanel.id, "Expected attached overlay to be the focused panel")
+        XCTAssertTrue(
+            overlayPanel.hostedView.isSurfaceViewFirstResponder(),
+            "Expected attached overlay terminal to own first responder before repair test"
+        )
+
+        XCTAssertTrue(window.makeFirstResponder(nil), "Expected test to clear the window first responder")
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertFalse(
+            overlayPanel.hostedView.isSurfaceViewFirstResponder(),
+            "Expected attached overlay terminal to lose first responder before repaired typing"
+        )
+        XCTAssertTrue(window.firstResponder == nil || window.firstResponder is NSWindow, "Expected a broken key-routing responder")
+
+        guard let keyDown = makeKeyDownEvent(
+            key: "a",
+            modifiers: [],
+            keyCode: 0,
+            windowNumber: window.windowNumber
+        ) else {
+            XCTFail("Failed to construct typing event")
+            return
+        }
+
+        window.sendEvent(keyDown)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertTrue(
+            overlayPanel.hostedView.isSurfaceViewFirstResponder(),
+            "Typing should repair first responder to the focused attached overlay terminal"
+        )
+        XCTAssertTrue(window.firstResponder === overlayTerminalView, "Typing repair should target the overlay Ghostty surface view")
+        XCTAssertFalse(window.firstResponder === baseTerminalView, "Typing repair must not fall through to the pane under the overlay")
+    }
+
     func testWindowPerformKeyEquivalentDefersTerminalPasteMenuMissToGhosttyBindingResolution() {
         let previousMainMenu = NSApp.mainMenu
         let probeWindow = NSWindow(

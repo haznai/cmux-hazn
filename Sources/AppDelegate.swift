@@ -4582,8 +4582,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
         guard let context = contextForMainWindow(window) ?? contextForMainTerminalWindow(window),
-              let workspace = context.tabManager.selectedWorkspace,
-              let panelId = workspace.focusedPanelId,
+              let workspace = context.tabManager.selectedWorkspace else {
+            return
+        }
+
+        if let overlay = workspace.attachedOverlaySurface,
+           overlay.isVisible,
+           overlay.isFocused,
+           let overlayPanel = workspace.panels[overlay.id],
+           !(overlayPanel is TerminalPanel) {
+            if !normalizedFlags.contains(.command),
+               let browserPanel = overlayPanel as? BrowserPanel {
+                _ = browserPanel.requestExplicitWebViewFocus()
+            }
+            return
+        }
+
+        guard let panelId = workspace.focusedPanelId,
               let terminalPanel = workspace.terminalPanel(for: panelId) else {
             return
         }
@@ -4618,7 +4633,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         )
 #endif
 
-        terminalPanel.hostedView.ensureFocus(for: workspace.id, surfaceId: panelId)
+        if workspace.isAttachedOverlaySurface(panelId) {
+            terminalPanel.focusAttachedOverlay()
+        } else {
+            terminalPanel.hostedView.ensureFocus(for: workspace.id, surfaceId: panelId)
+        }
 
 #if DEBUG
         let after = window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
