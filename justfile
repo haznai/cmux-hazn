@@ -15,6 +15,96 @@ rebuild-open:
 smoke-open:
   @./scripts/cmux-haznfloat --rebuild --smoke
 
+# Print a local health report for the tagged dev app, sockets, logs, and tools.
+doctor:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  tag="${CMUX_TAG:-haznfloat}"
+  slug="$(printf '%s' "$tag" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
+  [[ -n "$slug" ]] || slug="haznfloat"
+  app="$HOME/Library/Developer/Xcode/DerivedData/cmux-${slug}/Build/Products/Debug/cmux DEV ${slug}.app"
+  sock="/tmp/cmux-debug-${slug}.sock"
+  log="/tmp/cmux-debug-${slug}.log"
+  echo "cmux doctor"
+  echo "repo: $PWD"
+  echo "tag: $tag"
+  echo "slug: $slug"
+  echo
+  echo "tools:"
+  for tool in just xcodebuild swift python3 node npm clang; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      printf '  ok      %s -> %s\n' "$tool" "$(command -v "$tool")"
+    else
+      printf '  missing %s\n' "$tool"
+    fi
+  done
+  if command -v zig >/dev/null 2>&1; then
+    printf '  ok      zig -> %s\n' "$(command -v zig)"
+  else
+    echo "  optional zig missing (use CMUX_SKIP_ZIG_BUILD=1 for local debug builds)"
+  fi
+  echo
+  echo "paths:"
+  [[ -d "$app" ]] && echo "  ok      app: $app" || echo "  missing app: $app"
+  [[ -S "$sock" ]] && echo "  ok      socket: $sock" || echo "  missing socket: $sock"
+  [[ -f "$log" ]] && echo "  ok      log: $log" || echo "  missing log: $log"
+  for file in /tmp/cmux-last-cli-path /tmp/cmux-last-socket-path /tmp/cmux-last-debug-log-path; do
+    if [[ -r "$file" ]]; then
+      echo "  $(basename "$file"): $(cat "$file")"
+    else
+      echo "  $(basename "$file"): missing"
+    fi
+  done
+  echo
+  echo "processes:"
+  pgrep -fl "cmux DEV ${slug}.app/Contents/MacOS/cmux DEV" || true
+  echo
+  echo "socket users:"
+  if [[ -S "$sock" ]]; then
+    lsof -nU 2>/dev/null | grep -F "$sock" || echo "  socket exists, no lsof owner found"
+  else
+    echo "  no socket at $sock"
+  fi
+  echo
+  git status --short --branch
+
+# Alias for muscle memory while debugging.
+debug: doctor
+
+# Show recent cmux debug log lines from the last launched tagged app.
+debug-log lines="120":
+  @log="$(cat /tmp/cmux-last-debug-log-path 2>/dev/null || echo /tmp/cmux-debug-haznfloat.log)"; \
+  echo "log: $log"; \
+  if [[ -f "$log" ]]; then tail -n {{lines}} "$log"; else echo "missing log: $log" >&2; exit 1; fi
+
+# Follow the current cmux debug log.
+tail-log:
+  @log="$(cat /tmp/cmux-last-debug-log-path 2>/dev/null || echo /tmp/cmux-debug-haznfloat.log)"; \
+  echo "tailing: $log"; \
+  touch "$log"; \
+  tail -f "$log"
+
+# Inspect the current tagged cmux socket and the process holding it.
+debug-socket:
+  @sock="$(cat /tmp/cmux-last-socket-path 2>/dev/null || echo /tmp/cmux-debug-haznfloat.sock)"; \
+  echo "socket: $sock"; \
+  if [[ -S "$sock" ]]; then ls -l "$sock"; lsof -nU 2>/dev/null | grep -F "$sock" || true; else echo "missing socket: $sock" >&2; exit 1; fi
+
+# Run the Pi overlay smoke test against the last launched tagged socket.
+debug-smoke:
+  @sock="$(cat /tmp/cmux-last-socket-path 2>/dev/null || echo /tmp/cmux-debug-haznfloat.sock)"; \
+  echo "CMUX_SOCKET_PATH=$sock"; \
+  CMUX_SOCKET_PATH="$sock" ./scripts/smoke-pi-overlay-controls.py
+
+# Stop and remove local files for the tagged dev app. Defaults to haznfloat.
+debug-clean tag="haznfloat":
+  @slug="$(printf '%s' "{{tag}}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"; \
+  [[ -n "$slug" ]] || slug="haznfloat"; \
+  echo "cleaning cmux tag: $slug"; \
+  pkill -f "cmux DEV ${slug}.app/Contents/MacOS/cmux DEV" || true; \
+  rm -rf "$HOME/Library/Developer/Xcode/DerivedData/cmux-${slug}" "/tmp/cmux-${slug}"; \
+  rm -f "/tmp/cmux-debug-${slug}.sock" "/tmp/cmux-debug-${slug}.log" "$HOME/Library/Application Support/cmux/cmuxd-dev-${slug}.sock"
+
 # Run any file in scripts/ by basename, selecting the interpreter by extension.
 script name *args:
   @script="scripts/{{name}}"; \

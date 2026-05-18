@@ -109,6 +109,7 @@ BID="com.cmuxterm.app.debug.${TAG_ID}"
 SOCK="/tmp/cmux-debug-${TAG_SLUG}.sock"
 DSOCK="$HOME/Library/Application Support/cmux/cmuxd-dev-${TAG_SLUG}.sock"
 LOG="/tmp/cmux-debug-${TAG_SLUG}.log"
+CLI="$APP/Contents/Resources/bin/cmux"
 
 if [[ ! -d "$APP" ]]; then
   echo "error: tagged app not found at $APP" >&2
@@ -120,6 +121,12 @@ sleep 0.5
 pkill -f "cmux DEV ${TAG}.app/Contents/MacOS/cmux DEV" || true
 rm -f "$SOCK" "$DSOCK"
 sleep 0.5
+
+echo "$SOCK" > /tmp/cmux-last-socket-path || true
+echo "$LOG" > /tmp/cmux-last-debug-log-path || true
+if [[ -x "$CLI" ]]; then
+  echo "$CLI" > /tmp/cmux-last-cli-path || true
+fi
 
 OPEN_ENV=(
   env

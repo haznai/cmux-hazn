@@ -109,6 +109,52 @@ This creates an isolated app with its own name, bundle ID, socket, and derived d
 
 Before launching a new tagged run, clean up any older tags you started in this session (quit old tagged app + remove its `/tmp` socket/derived data).
 
+## Just debug/doctor tools
+
+Prefer the root `justfile` for local debug loops. These recipes wrap the tagged
+`haznfloat` app and avoid untagged `cmux DEV.app` launches.
+
+```bash
+just open
+just rebuild-open
+just smoke-open
+```
+
+- `just open` opens the existing tagged `haznfloat` dev app through `scripts/cmux-haznfloat`.
+- `just rebuild-open` rebuilds the tagged app, then opens it.
+- `just smoke-open` rebuilds, opens, and runs the Pi overlay control smoke test.
+
+Use these when investigating focus, sockets, overlays, or launch failures:
+
+```bash
+just doctor
+just debug
+just debug-socket
+just debug-log
+just debug-log 300
+just tail-log
+just debug-smoke
+just debug-clean
+```
+
+- `just doctor` prints tool availability, tagged app path, socket/log paths, running cmux processes, socket owners, and git status.
+- `just debug` is an alias for `just doctor`.
+- `just debug-socket` inspects the current tagged socket from `/tmp/cmux-last-socket-path`.
+- `just debug-log [lines]` prints recent lines from `/tmp/cmux-last-debug-log-path`.
+- `just tail-log` follows the current cmux debug log.
+- `just debug-smoke` runs `scripts/smoke-pi-overlay-controls.py` against the last launched tagged socket.
+- `just debug-clean [tag]` kills and removes local files for a tagged dev app; it defaults to `haznfloat`.
+
+Generic script wrappers are also available:
+
+```bash
+just script <script-basename> --help
+just test-unit -only-testing:cmuxTests/AppDelegateShortcutRoutingTests
+```
+
+Do not use these wrappers to bypass the local testing policy below. E2E/UI/socket
+tests still belong in CI unless the user explicitly asks for a local debug run.
+
 ## Cloud VM secrets
 
 Cloud VM build, test, and local dev scripts use provider secrets from `~/.secrets/cmux.env`.
