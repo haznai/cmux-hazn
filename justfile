@@ -15,6 +15,30 @@ rebuild-open:
 smoke-open:
   @./scripts/cmux-haznfloat --rebuild --smoke
 
+# Print the short workflow for continuing Pi/cmux overlay work.
+work:
+  @printf '%s\n' \
+    'cd "/Users/hazn/Desktop/new.code/cmux-hazn"' \
+    'just open' \
+    'just doctor' \
+    'just debug-socket' \
+    'just debug-log 120' \
+    'just debug-smoke' \
+    'just rebuild-open' \
+    'just smoke-open' \
+    '' \
+    'Pi launch examples:' \
+    '/shell:interactive --cmux "zsh -lic \"hunk; exec zsh -l\""' \
+    '/shell:interactive --cmux --browser "https://example.com"'
+
+# Show the current Pi/cmux overlay spec.
+spec:
+  @sed -n '1,260p' docs/specs/pi-hazn-shell-attached-overlays.md
+
+# Show the consolidated Codex handoff for this work.
+handoff:
+  @sed -n '1,260p' docs/handoffs/codex-019dfbc0-c1e5-78d1-984b-49d43e98984d-consolidated-handoff.md
+
 # Print a local health report for the tagged dev app, sockets, logs, and tools.
 doctor:
   #!/usr/bin/env bash
@@ -66,7 +90,11 @@ doctor:
     echo "  no socket at $sock"
   fi
   echo
-  git status --short --branch
+  if command -v jj >/dev/null 2>&1 && [[ -d .jj ]]; then
+    jj status --no-pager
+  else
+    echo "jj workspace missing; initialize with: jj git init --colocate"
+  fi
 
 # Alias for muscle memory while debugging.
 debug: doctor

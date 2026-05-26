@@ -109,12 +109,23 @@ This creates an isolated app with its own name, bundle ID, socket, and derived d
 
 Before launching a new tagged run, clean up any older tags you started in this session (quit old tagged app + remove its `/tmp` socket/derived data).
 
+## Pi/cmux overlay work
+
+Current spec: `docs/specs/pi-hazn-shell-attached-overlays.md`.
+
+Session handoff: `docs/handoffs/codex-019dfbc0-c1e5-78d1-984b-49d43e98984d-consolidated-handoff.md`.
+
+This checkout is the Hazn cmux fork workspace. Use the writable `haznai` remote (`https://github.com/haznai/cmux-hazn.git`) for this work. Do not push to upstream `manaflow-ai/cmux`; that remote should not be present in this local checkout.
+
 ## Just debug/doctor tools
 
 Prefer the root `justfile` for local debug loops. These recipes wrap the tagged
 `haznfloat` app and avoid untagged `cmux DEV.app` launches.
 
 ```bash
+just work
+just spec
+just handoff
 just open
 just rebuild-open
 just smoke-open
@@ -137,7 +148,10 @@ just debug-smoke
 just debug-clean
 ```
 
-- `just doctor` prints tool availability, tagged app path, socket/log paths, running cmux processes, socket owners, and git status.
+- `just work` prints the short local workflow and Pi launch examples.
+- `just spec` prints the current Pi/cmux overlay spec.
+- `just handoff` prints the consolidated Codex handoff for this work.
+- `just doctor` prints tool availability, tagged app path, socket/log paths, running cmux processes, socket owners, and jj status.
 - `just debug` is an alias for `just doctor`.
 - `just debug-socket` inspects the current tagged socket from `/tmp/cmux-last-socket-path`.
 - `just debug-log [lines]` prints recent lines from `/tmp/cmux-last-debug-log-path`.
