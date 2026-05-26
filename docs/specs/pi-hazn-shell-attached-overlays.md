@@ -14,7 +14,7 @@ The core product bet is simple: cmux changes the render surface, not the Pi sess
 - A user can launch an attached terminal or browser overlay from Pi without blocking the agent's own work.
 - The overlay is attached to the active cmux workspace/pane, not a random detached native window.
 - Terminal overlays are real terminal surfaces, so heavy TUIs like jjui and Neovim should render through cmux/Ghostty rather than Pi's xterm text renderer.
-- Browser overlays are real browser surfaces and keep a visible URL/control strip.
+- Browser overlays are real browser surfaces, keep a visible URL/control strip, and are driven through native cmux `browser.*` RPCs rather than terminal input.
 - `Ctrl+T` transfers current state to Pi without killing or backgrounding the session.
 - `Ctrl+B` backgrounds the session visually and logically. The process/browser stays alive and pollable. This is a local lifecycle action; it must not message the agent or trigger a turn.
 - Open cmux sessions appear in the same Pi session widget and `/attach`/`/kill` choices as normal shell sessions.
@@ -68,7 +68,7 @@ Use private user mode when the agent should not see the session:
 
 The bridge has two directions:
 
-- Pi to cmux: open terminal/browser overlay, read terminal text, send input, background, focus, close.
+- Pi to cmux: open terminal/browser overlay, read terminal text or browser snapshots, send terminal input, drive browser actions through native cmux `browser.*` RPCs, background, focus, close.
 - cmux to Pi: emit Pi-specific overlay events for transfer/background/close when a Pi-controlled overlay receives `Ctrl+T`, `Ctrl+B`, or a `Ctrl+Q`/overlay-owned `Cmd+W` menu choice.
 
 The cmux surface is tagged as Pi-controlled when launched through the Pi cmux backend. Only tagged surfaces intercept Pi overlay shortcuts. Ordinary cmux surfaces keep their normal key handling.
