@@ -17,8 +17,9 @@ The core product bet is simple: cmux changes the render surface, not the Pi sess
 - Browser overlays are real browser surfaces and keep a visible URL/control strip.
 - `Ctrl+T` transfers current state to Pi without killing or backgrounding the session.
 - `Ctrl+B` backgrounds the session visually and logically. The process/browser stays alive and pollable.
-- `Ctrl+Q` closes the overlay session.
-- `/attach <id>` brings a backgrounded cmux overlay back.
+- Open cmux sessions appear in the same Pi session widget and `/attach`/`/kill` choices as normal shell sessions.
+- `Ctrl+Q` closes the overlay session silently, like closing the normal Pi overlay. It must not trigger a new agent turn.
+- `/attach <id>` brings a cmux overlay back or focuses an already-open cmux overlay.
 - `/kill <id>` closes a cmux-backed session the same way it closes a normal Pi overlay session.
 - Private user shell sessions must stay private to the user. The agent should not see or poll them unless the user chose an agent-visible mode.
 - Normal cmux terminals must not lose their ordinary Ctrl key behavior. Pi overlay shortcuts are scoped to Pi-launched, Pi-controlled overlays.
