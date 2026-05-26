@@ -808,6 +808,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
     var debugCloseMainWindowConfirmationHandler: ((NSWindow) -> Bool)?
     var debugCreateMainWindowSourceIsNativeFullScreenOverride: Bool?
+    var debugPiHaznOverlayMenuChoiceHandler: ((String, [String]) -> String?)?
     // Keep debug-only windows alive when tests intentionally inject key mismatches.
     private var debugDetachedContextWindows: [NSWindow] = []
 
@@ -12744,29 +12745,256 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             case .close: return "close"
             }
         }
+    }
 
-        var shortcut: String {
+    private enum PiHaznOverlayShortcutIntent {
+        case action(PiHaznOverlayShortcutAction)
+        case menu
+    }
+
+    private enum PiHaznOverlayMenuChoice: String {
+        case transfer
+        case background
+        case kill
+        case cancel
+
+        var title: String {
             switch self {
-            case .transfer: return "ctrl+t"
-            case .background: return "ctrl+b"
-            case .close: return "ctrl+q"
+            case .transfer:
+                return String(localized: "piHaznOverlay.menu.transfer", defaultValue: "Transfer output to agent")
+            case .background:
+                return String(localized: "piHaznOverlay.menu.background", defaultValue: "Background session")
+            case .kill:
+                return String(localized: "piHaznOverlay.menu.kill", defaultValue: "Kill process")
+            case .cancel:
+                return String(localized: "piHaznOverlay.menu.cancel", defaultValue: "Cancel (return to session)")
+            }
+        }
+
+        var action: PiHaznOverlayShortcutAction? {
+            switch self {
+            case .transfer: return .transfer
+            case .background: return .background
+            case .kill: return .close
+            case .cancel: return nil
             }
         }
     }
 
-    private func piHaznOverlayShortcutAction(event: NSEvent, chars: String, normalizedFlags: NSEvent.ModifierFlags) -> PiHaznOverlayShortcutAction? {
-        guard normalizedFlags == .control else { return nil }
+    private struct PiHaznOverlayShortcutMatch {
+        let intent: PiHaznOverlayShortcutIntent
+        let shortcut: String
+    }
+
+    private struct PiHaznOverlayActionContext {
+        let workspace: Workspace
+        let workspaceId: UUID
+        let surfaceId: UUID
+        let paneId: PaneID
+        let windowId: UUID
+        let surfaceType: String
+    }
+
+    private final class PiHaznOverlayMenuItemPayload: NSObject {
+        let actionContext: PiHaznOverlayActionContext
+        let shortcut: String
+        let choice: PiHaznOverlayMenuChoice
+
+        init(actionContext: PiHaznOverlayActionContext, shortcut: String, choice: PiHaznOverlayMenuChoice) {
+            self.actionContext = actionContext
+            self.shortcut = shortcut
+            self.choice = choice
+        }
+    }
+
+    private func piHaznOverlayShortcutAction(event: NSEvent, chars: String, normalizedFlags: NSEvent.ModifierFlags) -> PiHaznOverlayShortcutMatch? {
         let lowered = chars.lowercased()
-        if lowered == "t" || event.characters == "\u{14}" || event.keyCode == 17 {
-            return .transfer
+        if normalizedFlags == .control {
+            if lowered == "t" || event.characters == "\u{14}" || event.keyCode == 17 {
+                return PiHaznOverlayShortcutMatch(intent: .action(.transfer), shortcut: "ctrl+t")
+            }
+            if lowered == "b" || event.characters == "\u{02}" || event.keyCode == 11 {
+                return PiHaznOverlayShortcutMatch(intent: .action(.background), shortcut: "ctrl+b")
+            }
+            if lowered == "q" || event.characters == "\u{11}" || event.keyCode == 12 {
+                return PiHaznOverlayShortcutMatch(intent: .menu, shortcut: "ctrl+q")
+            }
+            return nil
         }
-        if lowered == "b" || event.characters == "\u{02}" || event.keyCode == 11 {
-            return .background
-        }
-        if lowered == "q" || event.characters == "\u{11}" || event.keyCode == 12 {
-            return .close
+        if normalizedFlags == .command, lowered == "w" || event.keyCode == 13 {
+            return PiHaznOverlayShortcutMatch(intent: .menu, shortcut: "cmd+w")
         }
         return nil
+    }
+
+    private func piHaznOverlayActionContext(
+        workspace: Workspace,
+        overlay: WorkspaceAttachedOverlaySurface,
+        panel: any Panel,
+        windowId: UUID
+    ) -> PiHaznOverlayActionContext {
+        PiHaznOverlayActionContext(
+            workspace: workspace,
+            workspaceId: workspace.id,
+            surfaceId: overlay.id,
+            paneId: overlay.anchorPaneId,
+            windowId: windowId,
+            surfaceType: panel.panelType.rawValue
+        )
+    }
+
+    private func publishPiHaznOverlayEvent(
+        action: PiHaznOverlayShortcutAction,
+        shortcut: String,
+        context: PiHaznOverlayActionContext,
+        visible: Bool,
+        handled: Bool
+    ) {
+        CmuxEventBus.shared.publish(
+            name: action.eventName,
+            category: "pi_hazn_shell",
+            source: "keyboard.overlay",
+            workspaceId: context.workspaceId.uuidString,
+            surfaceId: context.surfaceId.uuidString,
+            paneId: context.paneId.id.uuidString,
+            windowId: context.windowId.uuidString,
+            payload: [
+                "action": action.actionName,
+                "shortcut": shortcut,
+                "workspace_id": context.workspaceId.uuidString,
+                "surface_id": context.surfaceId.uuidString,
+                "pane_id": context.paneId.id.uuidString,
+                "window_id": context.windowId.uuidString,
+                "surface_type": context.surfaceType,
+                "placement": "overlay",
+                "visible": visible,
+                "focused": visible && action != .background,
+                "handled": handled
+            ]
+        )
+    }
+
+    @discardableResult
+    private func performPiHaznOverlayAction(
+        _ action: PiHaznOverlayShortcutAction,
+        shortcut: String,
+        context: PiHaznOverlayActionContext
+    ) -> Bool {
+        guard let overlay = context.workspace.attachedOverlaySurface,
+              overlay.id == context.surfaceId,
+              context.workspace.panels[context.surfaceId] != nil else {
+            publishPiHaznOverlayEvent(
+                action: action,
+                shortcut: shortcut,
+                context: context,
+                visible: false,
+                handled: false
+            )
+            return false
+        }
+
+        switch action {
+        case .transfer:
+            publishPiHaznOverlayEvent(
+                action: action,
+                shortcut: shortcut,
+                context: context,
+                visible: overlay.isVisible,
+                handled: true
+            )
+            return true
+        case .background:
+            let handled = context.workspace.backgroundAttachedOverlaySurface(context.surfaceId)
+            publishPiHaznOverlayEvent(
+                action: action,
+                shortcut: shortcut,
+                context: context,
+                visible: false,
+                handled: handled
+            )
+            return handled
+        case .close:
+            let handled = context.workspace.closeAttachedOverlaySurface(context.surfaceId, force: true)
+            publishPiHaznOverlayEvent(
+                action: action,
+                shortcut: shortcut,
+                context: context,
+                visible: false,
+                handled: handled
+            )
+            return handled
+        }
+    }
+
+    @discardableResult
+    private func performPiHaznOverlayMenuChoice(
+        _ choice: PiHaznOverlayMenuChoice,
+        shortcut: String,
+        context: PiHaznOverlayActionContext
+    ) -> Bool {
+        guard let action = choice.action else { return true }
+        return performPiHaznOverlayAction(action, shortcut: shortcut, context: context)
+    }
+
+    private func piHaznOverlayMenuAnchorView(panel: any Panel, window: NSWindow?) -> NSView? {
+        if let terminalPanel = panel as? TerminalPanel {
+            return terminalPanel.hostedView
+        }
+        if let browserPanel = panel as? BrowserPanel {
+            return browserPanel.webView
+        }
+        return window?.contentView
+    }
+
+    private func presentPiHaznOverlayLifecycleMenu(
+        shortcut: String,
+        context: PiHaznOverlayActionContext,
+        anchorView: NSView?
+    ) -> Bool {
+        let choices: [PiHaznOverlayMenuChoice] = [.transfer, .background, .kill, .cancel]
+
+#if DEBUG
+        if let debugPiHaznOverlayMenuChoiceHandler {
+            let rawChoice = debugPiHaznOverlayMenuChoiceHandler(shortcut, choices.map(\.rawValue))
+            guard let rawChoice,
+                  let choice = PiHaznOverlayMenuChoice(rawValue: rawChoice) else {
+                return true
+            }
+            performPiHaznOverlayMenuChoice(choice, shortcut: shortcut, context: context)
+            return true
+        }
+#endif
+
+        let menu = NSMenu(title: String(localized: "piHaznOverlay.menu.title", defaultValue: "Shell Session"))
+        menu.autoenablesItems = false
+        for choice in choices {
+            let item = NSMenuItem(
+                title: choice.title,
+                action: #selector(handlePiHaznOverlayLifecycleMenuItem(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = PiHaznOverlayMenuItemPayload(
+                actionContext: context,
+                shortcut: shortcut,
+                choice: choice
+            )
+            item.isEnabled = true
+            menu.addItem(item)
+        }
+
+        guard let anchorView else { return true }
+        let anchorPoint = NSPoint(
+            x: max(12, min(anchorView.bounds.midX, anchorView.bounds.maxX - 12)),
+            y: max(12, min(anchorView.bounds.midY, anchorView.bounds.maxY - 12))
+        )
+        menu.popUp(positioning: nil, at: anchorPoint, in: anchorView)
+        return true
+    }
+
+    @objc private func handlePiHaznOverlayLifecycleMenuItem(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? PiHaznOverlayMenuItemPayload else { return }
+        performPiHaznOverlayMenuChoice(payload.choice, shortcut: payload.shortcut, context: payload.actionContext)
     }
 
     private func handlePiHaznOverlayShortcut(
@@ -12776,7 +13004,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         commandPaletteEffectiveInTargetWindow: Bool
     ) -> Bool {
         guard !commandPaletteEffectiveInTargetWindow,
-              let action = piHaznOverlayShortcutAction(
+              let shortcutMatch = piHaznOverlayShortcutAction(
                 event: event,
                 chars: chars,
                 normalizedFlags: normalizedFlags
@@ -12792,43 +13020,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return false
         }
 
-        func publish(visible: Bool, handled: Bool) {
-            CmuxEventBus.shared.publish(
-                name: action.eventName,
-                category: "pi_hazn_shell",
-                source: "keyboard.overlay",
-                workspaceId: workspace.id.uuidString,
-                surfaceId: overlay.id.uuidString,
-                paneId: overlay.anchorPaneId.id.uuidString,
-                windowId: context.windowId.uuidString,
-                payload: [
-                    "action": action.actionName,
-                    "shortcut": action.shortcut,
-                    "workspace_id": workspace.id.uuidString,
-                    "surface_id": overlay.id.uuidString,
-                    "pane_id": overlay.anchorPaneId.id.uuidString,
-                    "window_id": context.windowId.uuidString,
-                    "surface_type": panel.panelType.rawValue,
-                    "placement": "overlay",
-                    "visible": visible,
-                    "focused": visible && action.actionName != "background",
-                    "handled": handled
-                ]
-            )
-        }
+        let actionContext = piHaznOverlayActionContext(
+            workspace: workspace,
+            overlay: overlay,
+            panel: panel,
+            windowId: context.windowId
+        )
 
-        switch action {
-        case .transfer:
-            publish(visible: true, handled: true)
-            return true
-        case .background:
-            let handled = workspace.backgroundAttachedOverlaySurface(overlay.id)
-            publish(visible: false, handled: handled)
-            return handled
-        case .close:
-            let handled = workspace.closeAttachedOverlaySurface(overlay.id, force: true)
-            publish(visible: false, handled: handled)
-            return handled
+        switch shortcutMatch.intent {
+        case .action(let action):
+            return performPiHaznOverlayAction(action, shortcut: shortcutMatch.shortcut, context: actionContext)
+        case .menu:
+            return presentPiHaznOverlayLifecycleMenu(
+                shortcut: shortcutMatch.shortcut,
+                context: actionContext,
+                anchorView: piHaznOverlayMenuAnchorView(panel: panel, window: context.window)
+            )
         }
     }
 

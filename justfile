@@ -28,7 +28,7 @@ work:
     'just smoke-open' \
     '' \
     'Pi launch examples:' \
-    '/shell:interactive --cmux "zsh -lic \"hunk; exec zsh -l\""' \
+    '/shell:interactive --cmux "zsh -lic \"jjui; exec zsh -l\""' \
     '/shell:interactive --cmux --browser "https://example.com"'
 
 # Show the current Pi/cmux overlay spec.

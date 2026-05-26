@@ -85,7 +85,7 @@ cmux rpc pane.create '{
   "workspace_id": "workspace:1",
   "type": "terminal",
   "placement": "overlay",
-  "initial_command": "zsh -lic '\''hunk; exec zsh -l'\''",
+  "initial_command": "zsh -lic '\''jjui; exec zsh -l'\''",
   "focus": true
 }'
 
@@ -130,8 +130,9 @@ cmux terminals and ordinary cmux overlays keep their normal Ctrl key behavior:
 | Shortcut | Event | Effect |
 | --- | --- | --- |
 | `Ctrl+T` | `pi_hazn_shell.transfer_requested` | Pi reads the terminal/browser state and transfers it to the agent; the overlay stays open. |
-| `Ctrl+B` | `pi_hazn_shell.backgrounded` | cmux hides the overlay and keeps the process/browser alive. |
-| `Ctrl+Q` | `pi_hazn_shell.closed` | cmux closes the overlay surface. |
+| `Ctrl+B` | `pi_hazn_shell.backgrounded` | cmux hides the overlay and keeps the process/browser alive. Pi handles this silently without triggering an agent turn. |
+| `Ctrl+Q` | Menu choice dependent | cmux opens the local Pi session menu. Transfer/background/kill choices publish the same Pi events as the direct shortcuts; cancel publishes nothing. |
+| `Cmd+W` | Menu choice dependent | When a Pi-controlled overlay is focused, cmux opens the same menu as `Ctrl+Q` without closing the window. |
 
 Pi subscribes with:
 

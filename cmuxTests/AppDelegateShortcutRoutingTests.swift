@@ -127,6 +127,7 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         AppDelegate.shared?.shortcutLayoutCharacterProvider = KeyboardLayout.character(forKeyCode:modifierFlags:)
         AppDelegate.shared?.debugCloseMainWindowConfirmationHandler = nil
         AppDelegate.shared?.debugCreateMainWindowSourceIsNativeFullScreenOverride = nil
+        AppDelegate.shared?.debugPiHaznOverlayMenuChoiceHandler = nil
         AppDelegate.shared?.dismissNotificationsPopoverIfShown()
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         for action in KeyboardShortcutSettings.Action.allCases {
@@ -5295,6 +5296,134 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         )
         XCTAssertTrue(window.firstResponder === overlayTerminalView, "Typing repair should target the overlay Ghostty surface view")
         XCTAssertFalse(window.firstResponder === baseTerminalView, "Typing repair must not fall through to the pane under the overlay")
+    }
+
+    func testCmdWOpensPiHaznAttachedOverlayMenuWithoutClosingWhenCancelled() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let window = window(withId: windowId),
+              let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let paneId = workspace.bonsplitController.focusedPaneId,
+              let overlayPanel = workspace.newOverlayTerminalSurface(
+                overPane: paneId,
+                focus: true,
+                piHaznShellControls: true
+              ) else {
+            XCTFail("Expected focused Pi hazn overlay surface")
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        overlayPanel.hostedView.setVisibleInUI(true)
+        overlayPanel.hostedView.setActive(true)
+        XCTAssertTrue(workspace.focusAttachedOverlaySurface(overlayPanel.id))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        var requestedShortcut: String?
+        var requestedChoices: [String] = []
+#if DEBUG
+        appDelegate.debugPiHaznOverlayMenuChoiceHandler = { shortcut, choices in
+            requestedShortcut = shortcut
+            requestedChoices = choices
+            return nil
+        }
+#endif
+
+        guard let event = makeKeyDownEvent(
+            key: "w",
+            modifiers: [.command],
+            keyCode: 13,
+            windowNumber: window.windowNumber
+        ) else {
+            XCTFail("Failed to construct Cmd+W event")
+            return
+        }
+
+#if DEBUG
+        XCTAssertTrue(appDelegate.debugHandleCustomShortcut(event: event))
+#else
+        XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+
+        XCTAssertEqual(requestedShortcut, "cmd+w")
+        XCTAssertEqual(requestedChoices, ["transfer", "background", "kill", "cancel"])
+        XCTAssertEqual(workspace.attachedOverlaySurface?.id, overlayPanel.id, "Cmd+W should show the Pi menu, not close the overlay")
+        XCTAssertNotNil(workspace.panels[overlayPanel.id], "Cmd+W menu cancel should keep the overlay surface registered")
+        XCTAssertTrue(window.isVisible, "Cmd+W must not close the cmux window while a Pi overlay owns it")
+    }
+
+    func testCtrlQPiHaznAttachedOverlayMenuKillChoiceClosesOnlyOverlay() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let window = window(withId: windowId),
+              let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let paneId = workspace.bonsplitController.focusedPaneId,
+              let overlayPanel = workspace.newOverlayTerminalSurface(
+                overPane: paneId,
+                focus: true,
+                piHaznShellControls: true
+              ) else {
+            XCTFail("Expected focused Pi hazn overlay surface")
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        overlayPanel.hostedView.setVisibleInUI(true)
+        overlayPanel.hostedView.setActive(true)
+        XCTAssertTrue(workspace.focusAttachedOverlaySurface(overlayPanel.id))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+#if DEBUG
+        CmuxEventBus.shared.resetForTesting()
+        appDelegate.debugPiHaznOverlayMenuChoiceHandler = { shortcut, _ in
+            XCTAssertEqual(shortcut, "ctrl+q")
+            return "kill"
+        }
+#endif
+
+        guard let event = makeKeyDownEvent(
+            key: "q",
+            modifiers: [.control],
+            keyCode: 12,
+            windowNumber: window.windowNumber
+        ) else {
+            XCTFail("Failed to construct Ctrl+Q event")
+            return
+        }
+
+#if DEBUG
+        XCTAssertTrue(appDelegate.debugHandleCustomShortcut(event: event))
+#else
+        XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+
+        XCTAssertNil(workspace.attachedOverlaySurface, "Ctrl+Q should close the Pi overlay only after the menu kill choice")
+        XCTAssertNil(workspace.panels[overlayPanel.id], "Menu kill should unregister the overlay surface")
+        XCTAssertTrue(window.isVisible, "Ctrl+Q menu kill must not close the cmux window while a Pi overlay owns it")
+
+#if DEBUG
+        let eventBusEntry = CmuxEventBus.shared.retainedSnapshot().last
+        XCTAssertEqual(eventBusEntry?["name"] as? String, "pi_hazn_shell.closed")
+        let payload = eventBusEntry?["payload"] as? [String: Any]
+        XCTAssertEqual(payload?["shortcut"] as? String, "ctrl+q")
+        XCTAssertEqual(payload?["action"] as? String, "close")
+#endif
     }
 
     func testWindowPerformKeyEquivalentDefersTerminalPasteMenuMissToGhosttyBindingResolution() {
