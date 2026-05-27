@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 
 
 EVENT_TRANSFER = "pi_hazn_shell.transfer_requested"
@@ -139,6 +140,26 @@ def create_overlay(workspace, marker, pi_controls):
     )
 
 
+def create_browser_overlay(workspace, marker, pi_controls):
+    html = f"""<!doctype html>
+<html>
+  <head><meta charset=\"utf-8\"><title>{marker}</title></head>
+  <body><main><h1>{marker}</h1><button>Browser smoke button</button></main></body>
+</html>"""
+    url = "data:text/html;charset=utf-8," + urllib.parse.quote(html)
+    return run_rpc(
+        "pane.create",
+        {
+            "workspace_id": workspace,
+            "type": "browser",
+            "placement": "overlay",
+            "focus": True,
+            "pi_hazn_shell_controls": pi_controls,
+            "url": url,
+        },
+    )
+
+
 def close_surface(workspace, surface):
     try:
         run_rpc("surface.close", {"workspace_id": workspace, "surface_id": surface}, timeout=5)
@@ -206,6 +227,31 @@ def wait_for_marker(workspace, surface, marker, timeout=8):
     die(f"surface {surface} never rendered {marker!r}; last screen text was:\n{last}")
 
 
+def browser_snapshot_text(workspace, surface):
+    payload = run_rpc(
+        "browser.snapshot",
+        {"workspace_id": workspace, "surface_id": surface, "compact": True, "max_depth": 10},
+    )
+    page = payload.get("page") or {}
+    return "\n".join(
+        str(value or "")
+        for value in [payload.get("title"), payload.get("url"), payload.get("snapshot"), page.get("text")]
+    )
+
+
+def wait_for_browser_marker(workspace, surface, marker, timeout=8):
+    deadline = time.time() + timeout
+    last = ""
+    # WKWebView can still be attaching immediately after pane.create returns.
+    time.sleep(0.5)
+    while time.time() < deadline:
+        last = browser_snapshot_text(workspace, surface)
+        if marker in last:
+            return last
+        time.sleep(0.2)
+    die(f"browser surface {surface} never rendered {marker!r}; last snapshot was:\n{last}")
+
+
 def expect(condition, message):
     if not condition:
         die(message)
@@ -223,6 +269,7 @@ def main():
     print(f"baseline_visible_terminals={baseline_visible_terminals}")
 
     pi_surface = None
+    browser_surface = None
     normal_surface = None
     try:
         pi = create_overlay(workspace, "PI_SMOKE_READY", True)
@@ -258,6 +305,33 @@ def main():
         close_surface(workspace, pi_surface)
         pi_surface = None
 
+        browser = create_browser_overlay(workspace, "BROWSER_SMOKE_READY", True)
+        browser_surface = browser["surface_id"]
+        expect(browser.get("pi_hazn_shell_controls") is True, "Pi browser overlay did not echo pi_hazn_shell_controls=true")
+        wait_for_browser_marker(workspace, browser_surface, "BROWSER_SMOKE_READY")
+        print(f"browser_overlay={browser_surface} snapshot_state=ok")
+
+        before = latest_event_seq(EVENT_TRANSFER)
+        run_rpc("debug.shortcut.simulate", {"combo": "ctrl+t"})
+        event = wait_event_after(EVENT_TRANSFER, before, 3)
+        expect(event is not None, "Ctrl+T on Pi browser overlay did not publish transfer event")
+        expect(event.get("surface_id") == browser_surface, f"browser transfer event was for {event.get('surface_id')}, not {browser_surface}")
+        print(f"browser_ctrl_t_event_seq={event.get('seq')}")
+
+        before = latest_event_seq(EVENT_BACKGROUND)
+        run_rpc("debug.shortcut.simulate", {"combo": "ctrl+b"})
+        event = wait_event_after(EVENT_BACKGROUND, before, 3)
+        expect(event is not None, "Ctrl+B on Pi browser overlay did not publish background event")
+        expect(event.get("surface_id") == browser_surface, f"browser background event was for {event.get('surface_id')}, not {browser_surface}")
+        backgrounded = surface_item(workspace, browser_surface)
+        expect(backgrounded is not None, "backgrounded Pi browser overlay disappeared instead of staying pollable")
+        expect(backgrounded.get("visible") is False, f"backgrounded Pi browser overlay still listed as visible: {backgrounded}")
+        expect(backgrounded.get("focused") is False, f"backgrounded Pi browser overlay still listed as focused: {backgrounded}")
+        print(f"browser_ctrl_b_event_seq={event.get('seq')} visible=false")
+
+        close_surface(workspace, browser_surface)
+        browser_surface = None
+
         normal = create_overlay(workspace, "NORMAL_SMOKE_READY", False)
         normal_surface = normal["surface_id"]
         expect(normal.get("pi_hazn_shell_controls") is False, "normal overlay unexpectedly has Pi controls")
@@ -272,6 +346,8 @@ def main():
     finally:
         if normal_surface:
             close_surface(workspace, normal_surface)
+        if browser_surface:
+            close_surface(workspace, browser_surface)
         if pi_surface:
             close_surface(workspace, pi_surface)
 
