@@ -13,6 +13,7 @@ The core product bet is simple: cmux changes the render surface, not the Pi sess
 
 - A user can launch an attached terminal or browser overlay from Pi without blocking the agent's own work.
 - The overlay is attached to the active cmux workspace/pane, not a random detached native window.
+- The overlay has a visible 2 px black boundary. Browser overlays mirror that boundary in the browser portal layer because WebKit content is hosted above the SwiftUI panel tree.
 - Terminal overlays are real terminal surfaces, so heavy TUIs like jjui and Neovim should render through cmux/Ghostty rather than Pi's xterm text renderer.
 - Browser overlays are real browser surfaces, keep a visible URL/control strip, and are driven through native cmux `browser.*` RPCs rather than terminal input.
 - `Ctrl+T` transfers current state to Pi without killing or backgrounding the session.

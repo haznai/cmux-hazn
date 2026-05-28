@@ -11,6 +11,7 @@ struct PanelContentView: View {
     let isSelectedInPane: Bool
     let isVisibleInUI: Bool
     let portalPriority: Int
+    let showsAttachedOverlayChrome: Bool
     let isSplit: Bool
     let appearance: PanelAppearance
     let hasUnreadNotification: Bool
@@ -51,6 +52,7 @@ struct PanelContentView: View {
                     isFocused: isFocused,
                     isVisibleInUI: isVisibleInUI,
                     portalPriority: portalPriority,
+                    showsAttachedOverlayChrome: showsAttachedOverlayChrome,
                     onRequestPanelFocus: onRequestPanelFocus
                 )
             }

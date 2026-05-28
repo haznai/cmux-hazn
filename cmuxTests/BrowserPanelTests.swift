@@ -2067,6 +2067,49 @@ final class WindowBrowserSlotViewTests: XCTestCase {
         advanceAnimations()
         XCTAssertEqual(slot.layer?.masksToBounds, true)
     }
+
+    func testAttachedOverlayBorderRendersAbovePortalContentAndExtendsOverBrowserChrome() {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 180))
+        let slot = WindowBrowserSlotView(frame: NSRect(x: 20, y: 12, width: 200, height: 120))
+        container.addSubview(slot)
+
+        let child = CapturingView(frame: slot.bounds)
+        child.autoresizingMask = [.width, .height]
+        slot.addSubview(child)
+
+        slot.setPaneTopChromeHeight(36)
+        slot.setAttachedOverlayChrome(true)
+        container.layoutSubtreeIfNeeded()
+
+        guard let border = container.subviews.first(where: {
+            $0 !== slot && String(describing: type(of: $0)).contains("AttachedOverlayBorderView")
+        }) else {
+            XCTFail("Expected attached overlay border")
+            return
+        }
+        guard let slotIndex = container.subviews.firstIndex(where: { $0 === slot }),
+              let borderIndex = container.subviews.firstIndex(where: { $0 === border }) else {
+            XCTFail("Expected slot and attached overlay border in the same container")
+            return
+        }
+
+        XCTAssertGreaterThan(borderIndex, slotIndex, "Border should render above portal-hosted browser content")
+        XCTAssertFalse(border.isHidden)
+        XCTAssertEqual(border.layer?.borderWidth ?? 0, 2, accuracy: 0.01)
+        XCTAssertEqual(border.frame.origin.x, 20, accuracy: 0.5)
+        XCTAssertEqual(border.frame.origin.y, 12, accuracy: 0.5)
+        XCTAssertEqual(border.frame.size.width, 200, accuracy: 0.5)
+        XCTAssertEqual(border.frame.size.height, 156, accuracy: 0.5)
+        XCTAssertNil(border.hitTest(NSPoint(x: 40, y: 40)), "Border should never intercept pointer hits")
+        XCTAssertTrue(slot.hitTest(NSPoint(x: 40, y: 40)) === child)
+
+        slot.setAttachedOverlayChrome(false)
+        XCTAssertTrue(border.isHidden)
+
+        slot.setAttachedOverlayChrome(true)
+        slot.removeFromSuperview()
+        XCTAssertNil(border.superview)
+    }
 }
 
 

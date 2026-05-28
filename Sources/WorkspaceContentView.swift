@@ -79,7 +79,7 @@ private final class AttachedOverlayBorderView: NSView {
 
     func updateBorder() {
         layer?.cornerRadius = 4
-        layer?.borderWidth = 1
+        layer?.borderWidth = 2
         layer?.borderColor = NSColor.black.cgColor
         layer?.backgroundColor = NSColor.clear.cgColor
         layer?.masksToBounds = false
@@ -281,6 +281,7 @@ struct WorkspaceContentView: View {
                     isSelectedInPane: isSelectedInPane,
                     isVisibleInUI: isVisibleInUI,
                     portalPriority: workspacePortalPriority,
+                    showsAttachedOverlayChrome: false,
                     isSplit: isSplit,
                     appearance: appearance,
                     hasUnreadNotification: showsNotificationRing && !usesWorkspacePaneOverlay,
@@ -402,6 +403,7 @@ struct WorkspaceContentView: View {
                         isSelectedInPane: true,
                         isVisibleInUI: isWorkspaceVisible && overlay.isVisible,
                         portalPriority: workspacePortalPriority + 100,
+                        showsAttachedOverlayChrome: true,
                         isSplit: false,
                         appearance: appearance,
                         hasUnreadNotification: false,

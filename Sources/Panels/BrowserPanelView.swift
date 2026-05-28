@@ -388,6 +388,7 @@ struct BrowserPanelView: View {
     let isFocused: Bool
     let isVisibleInUI: Bool
     let portalPriority: Int
+    let showsAttachedOverlayChrome: Bool
     let onRequestPanelFocus: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
@@ -1272,6 +1273,7 @@ struct BrowserPanelView: View {
                     shouldFocusWebView: isFocused && !addressBarFocused,
                     isPanelFocused: isFocused,
                     portalZPriority: portalPriority,
+                    showsAttachedOverlayChrome: showsAttachedOverlayChrome,
                     paneDropZone: paneDropZone,
                     searchOverlay: panel.searchState.map { searchState in
                         BrowserPortalSearchOverlayConfiguration(
@@ -4462,6 +4464,7 @@ struct WebViewRepresentable: NSViewRepresentable {
     let shouldFocusWebView: Bool
     let isPanelFocused: Bool
     let portalZPriority: Int
+    let showsAttachedOverlayChrome: Bool
     let paneDropZone: DropZone?
     let searchOverlay: BrowserPortalSearchOverlayConfiguration?
     let paneTopChromeHeight: CGFloat
@@ -4472,6 +4475,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         var attachGeneration: Int = 0
         var desiredPortalVisibleInUI: Bool = true
         var desiredPortalZPriority: Int = 0
+        var desiredPortalShowsAttachedOverlayChrome: Bool = false
         var lastPortalHostId: ObjectIdentifier?
         var lastSynchronizedHostGeometryRevision: UInt64 = 0
     }
@@ -6273,6 +6277,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.desiredPortalVisibleInUI = false
         coordinator.desiredPortalZPriority = 0
+        coordinator.desiredPortalShowsAttachedOverlayChrome = false
         coordinator.attachGeneration += 1
 
         if panel.releasePortalHostIfOwned(
@@ -6480,8 +6485,10 @@ struct WebViewRepresentable: NSViewRepresentable {
         let hostId = ObjectIdentifier(host)
         let previousVisible = coordinator.desiredPortalVisibleInUI
         let previousZPriority = coordinator.desiredPortalZPriority
+        let previousShowsAttachedOverlayChrome = coordinator.desiredPortalShowsAttachedOverlayChrome
         coordinator.desiredPortalVisibleInUI = shouldAttachWebView && isCurrentPaneOwner
         coordinator.desiredPortalZPriority = portalZPriority
+        coordinator.desiredPortalShowsAttachedOverlayChrome = showsAttachedOverlayChrome
         coordinator.attachGeneration += 1
         let generation = coordinator.attachGeneration
         let activePaneDropContext = coordinator.desiredPortalVisibleInUI ? paneDropContext : nil
@@ -6547,7 +6554,8 @@ struct WebViewRepresentable: NSViewRepresentable {
                 webView: webView,
                 to: portalAnchorView,
                 visibleInUI: coordinator.desiredPortalVisibleInUI,
-                zPriority: coordinator.desiredPortalZPriority
+                zPriority: coordinator.desiredPortalZPriority,
+                showsAttachedOverlayChrome: coordinator.desiredPortalShowsAttachedOverlayChrome
             )
             BrowserWindowPortalRegistry.refresh(
                 webView: webView,
@@ -6582,7 +6590,8 @@ struct WebViewRepresentable: NSViewRepresentable {
                     webView: webView,
                     to: portalAnchorView,
                     visibleInUI: coordinator.desiredPortalVisibleInUI,
-                    zPriority: coordinator.desiredPortalZPriority
+                    zPriority: coordinator.desiredPortalZPriority,
+                    showsAttachedOverlayChrome: coordinator.desiredPortalShowsAttachedOverlayChrome
                 )
                 BrowserWindowPortalRegistry.refresh(
                     webView: webView,
@@ -6616,14 +6625,16 @@ struct WebViewRepresentable: NSViewRepresentable {
                 webView.superview == nil ||
                 portalEntryMissing ||
                 previousVisible != shouldAttachWebView ||
-                previousZPriority != portalZPriority
+                previousZPriority != portalZPriority ||
+                previousShowsAttachedOverlayChrome != showsAttachedOverlayChrome
             if shouldBindNow {
                 Self.installPortalAnchorView(portalAnchorView, in: host)
                 BrowserWindowPortalRegistry.bind(
                     webView: webView,
                     to: portalAnchorView,
                     visibleInUI: coordinator.desiredPortalVisibleInUI,
-                    zPriority: coordinator.desiredPortalZPriority
+                    zPriority: coordinator.desiredPortalZPriority,
+                    showsAttachedOverlayChrome: coordinator.desiredPortalShowsAttachedOverlayChrome
                 )
                 // Force a rendering-state reattach after portal host replacement
                 // (e.g. after a pane split). Without this, WKWebView can freeze
@@ -6653,7 +6664,8 @@ struct WebViewRepresentable: NSViewRepresentable {
             BrowserWindowPortalRegistry.updateEntryVisibility(
                 for: webView,
                 visibleInUI: coordinator.desiredPortalVisibleInUI,
-                zPriority: coordinator.desiredPortalZPriority
+                zPriority: coordinator.desiredPortalZPriority,
+                showsAttachedOverlayChrome: coordinator.desiredPortalShowsAttachedOverlayChrome
             )
         }
 

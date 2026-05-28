@@ -2439,6 +2439,7 @@ final class BrowserDeveloperToolsVisibilityPersistenceTests: XCTestCase {
             shouldFocusWebView: false,
             isPanelFocused: true,
             portalZPriority: 0,
+            showsAttachedOverlayChrome: false,
             paneDropZone: nil,
             searchOverlay: nil,
             paneTopChromeHeight: 0
@@ -2481,6 +2482,7 @@ final class BrowserDeveloperToolsVisibilityPersistenceTests: XCTestCase {
             shouldFocusWebView: false,
             isPanelFocused: true,
             portalZPriority: 0,
+            showsAttachedOverlayChrome: false,
             paneDropZone: nil,
             searchOverlay: nil,
             paneTopChromeHeight: 0
@@ -2542,6 +2544,7 @@ final class BrowserDeveloperToolsVisibilityPersistenceTests: XCTestCase {
             shouldFocusWebView: false,
             isPanelFocused: true,
             portalZPriority: 0,
+            showsAttachedOverlayChrome: false,
             paneDropZone: nil,
             searchOverlay: nil,
             paneTopChromeHeight: 0
@@ -2625,6 +2628,7 @@ final class BrowserDeveloperToolsVisibilityPersistenceTests: XCTestCase {
             shouldFocusWebView: false,
             isPanelFocused: true,
             portalZPriority: 0,
+            showsAttachedOverlayChrome: false,
             paneDropZone: nil,
             searchOverlay: nil,
             paneTopChromeHeight: 0

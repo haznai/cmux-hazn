@@ -1416,6 +1416,30 @@ enum BrowserPaneDropRouting {
 }
 
 final class WindowBrowserSlotView: NSView {
+    private final class AttachedOverlayBorderView: NSView {
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+            updateBorder()
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        func updateBorder() {
+            wantsLayer = true
+            layer?.cornerRadius = 4
+            layer?.borderWidth = 2
+            layer?.borderColor = NSColor.black.cgColor
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.masksToBounds = false
+        }
+    }
+
     override var isOpaque: Bool { false }
     override var isHidden: Bool {
         didSet {
@@ -1424,6 +1448,7 @@ final class WindowBrowserSlotView: NSView {
         }
     }
     private let paneDropTargetView = BrowserPaneDropTargetView(frame: .zero)
+    private let attachedOverlayBorderView = AttachedOverlayBorderView(frame: .zero)
     private let dropZoneOverlayView = BrowserDropZoneOverlayView(frame: .zero)
     private var searchOverlayHostingView: NSHostingView<BrowserSearchOverlay>?
     private weak var hostedWebView: WKWebView?
@@ -1450,12 +1475,14 @@ final class WindowBrowserSlotView: NSView {
 
         paneDropTargetView.slotView = self
 
+        attachedOverlayBorderView.wantsLayer = true
         dropZoneOverlayView.wantsLayer = true
         dropZoneOverlayView.layer?.backgroundColor = cmuxAccentNSColor().withAlphaComponent(0.25).cgColor
         dropZoneOverlayView.layer?.borderColor = cmuxAccentNSColor().cgColor
         dropZoneOverlayView.layer?.borderWidth = 2
         dropZoneOverlayView.layer?.cornerRadius = 8
         dropZoneOverlayView.isHidden = true
+        attachedOverlayBorderView.isHidden = true
         addSubview(paneDropTargetView, positioned: .above, relativeTo: nil)
     }
 
@@ -1471,9 +1498,18 @@ final class WindowBrowserSlotView: NSView {
         super.viewWillMove(toWindow: newWindow)
     }
 
+    override func viewWillMove(toSuperview newSuperview: NSView?) {
+        if newSuperview == nil {
+            attachedOverlayBorderView.removeFromSuperview()
+            dropZoneOverlayView.removeFromSuperview()
+        }
+        super.viewWillMove(toSuperview: newSuperview)
+    }
+
     override func layout() {
         super.layout()
         paneDropTargetView.frame = bounds
+        applyResolvedAttachedOverlayBorderFrame()
         applyResolvedDropZoneOverlay()
         guard !isApplyingHostedInspectorLayout else { return }
         if let previousSize = lastHostedInspectorLayoutBoundsSize,
@@ -1486,7 +1522,10 @@ final class WindowBrowserSlotView: NSView {
 
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
+        guard superview != nil else { return }
+        attachAttachedOverlayBorderIfNeeded()
         attachDropZoneOverlayIfNeeded()
+        applyResolvedAttachedOverlayBorderFrame()
         applyResolvedDropZoneOverlay()
     }
 
@@ -1545,6 +1584,7 @@ final class WindowBrowserSlotView: NSView {
         let resolvedHeight = max(0, height)
         guard abs(paneTopChromeHeight - resolvedHeight) > 0.5 else { return }
         paneTopChromeHeight = resolvedHeight
+        applyResolvedAttachedOverlayBorderFrame()
         applyResolvedDropZoneOverlay()
     }
 
@@ -1764,9 +1804,21 @@ final class WindowBrowserSlotView: NSView {
         paneTopChromeHeight
     }
 
+    func setAttachedOverlayChrome(_ enabled: Bool) {
+        let desiredHidden = !enabled
+        let hiddenChanged = attachedOverlayBorderView.isHidden != desiredHidden
+        attachedOverlayBorderView.isHidden = desiredHidden
+        attachedOverlayBorderView.updateBorder()
+        applyResolvedAttachedOverlayBorderFrame()
+        if hiddenChanged || enabled {
+            bringInteractionLayersToFrontIfNeeded()
+        }
+    }
+
     override func didAddSubview(_ subview: NSView) {
         super.didAddSubview(subview)
         guard subview !== paneDropTargetView else { return }
+        guard subview !== attachedOverlayBorderView else { return }
         bringInteractionLayersToFrontIfNeeded()
     }
 
@@ -1776,6 +1828,13 @@ final class WindowBrowserSlotView: NSView {
 
     private func overlayContainerView() -> NSView {
         superview ?? self
+    }
+
+    private func attachAttachedOverlayBorderIfNeeded() {
+        guard let container = superview else { return }
+        guard attachedOverlayBorderView.superview !== container else { return }
+        attachedOverlayBorderView.removeFromSuperview()
+        container.addSubview(attachedOverlayBorderView, positioned: .above, relativeTo: nil)
     }
 
     private func attachDropZoneOverlayIfNeeded() {
@@ -1862,6 +1921,7 @@ final class WindowBrowserSlotView: NSView {
 
     private func interactionLayerPriority(of view: NSView) -> Int {
         if view === paneDropTargetView { return 1 }
+        if view === attachedOverlayBorderView { return 2 }
         return 0
     }
 
@@ -1874,6 +1934,11 @@ final class WindowBrowserSlotView: NSView {
             addSubview(paneDropTargetView, positioned: .above, relativeTo: nil)
         }
         let overlayContainer = overlayContainerView()
+        if attachedOverlayBorderView.superview !== overlayContainer {
+            attachAttachedOverlayBorderIfNeeded()
+        } else if overlayContainer.subviews.last !== attachedOverlayBorderView {
+            overlayContainer.addSubview(attachedOverlayBorderView, positioned: .above, relativeTo: nil)
+        }
         if dropZoneOverlayView.superview !== overlayContainer {
             attachDropZoneOverlayIfNeeded()
         } else if overlayContainer.subviews.last !== dropZoneOverlayView {
@@ -1889,6 +1954,28 @@ final class WindowBrowserSlotView: NSView {
             if lhsPriority == rhsPriority { return .orderedSame }
             return lhsPriority < rhsPriority ? .orderedAscending : .orderedDescending
         }, context: context)
+    }
+
+    private func applyResolvedAttachedOverlayBorderFrame() {
+        guard !attachedOverlayBorderView.isHidden else { return }
+        attachAttachedOverlayBorderIfNeeded()
+        let targetFrame = attachedOverlayBorderFrame()
+        guard !Self.rectApproximatelyEqual(attachedOverlayBorderView.frame, targetFrame) else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        attachedOverlayBorderView.frame = targetFrame
+        CATransaction.commit()
+    }
+
+    private func attachedOverlayBorderFrame() -> CGRect {
+        let localFrame = NSRect(
+            x: bounds.minX,
+            y: bounds.minY,
+            width: bounds.width,
+            height: bounds.height + paneTopChromeHeight
+        )
+        guard let superview else { return localFrame }
+        return superview.convert(localFrame, from: self)
     }
 
     private func applyDropZoneOverlayFrame(_ frame: CGRect) {
@@ -1949,6 +2036,7 @@ final class WindowBrowserPortal: NSObject {
         var paneDropContext: BrowserPaneDropContext?
         var searchOverlay: BrowserPortalSearchOverlayConfiguration?
         var paneTopChromeHeight: CGFloat
+        var showsAttachedOverlayChrome: Bool
         var transientRecoveryReason: String?
         var transientRecoveryRetriesRemaining: Int
     }
@@ -2498,12 +2586,14 @@ final class WindowBrowserPortal: NSObject {
             existing.setPaneDropContext(entry.paneDropContext)
             existing.setSearchOverlay(entry.searchOverlay)
             existing.setPaneTopChromeHeight(entry.paneTopChromeHeight)
+            existing.setAttachedOverlayChrome(entry.showsAttachedOverlayChrome)
             return existing
         }
         let created = WindowBrowserSlotView(frame: .zero)
         created.setPaneDropContext(entry.paneDropContext)
         created.setSearchOverlay(entry.searchOverlay)
         created.setPaneTopChromeHeight(entry.paneTopChromeHeight)
+        created.setAttachedOverlayChrome(entry.showsAttachedOverlayChrome)
 #if DEBUG
         cmuxDebugLog(
             "browser.portal.container.create web=\(browserPortalDebugToken(webView)) " +
@@ -2820,12 +2910,24 @@ final class WindowBrowserPortal: NSObject {
     /// Update the visibleInUI/zPriority state on an existing entry without rebinding.
     /// Used when a bind is deferred (host not yet in window) so stale portal syncs
     /// do not keep an old anchor visible.
-    func updateEntryVisibility(forWebViewId webViewId: ObjectIdentifier, visibleInUI: Bool, zPriority: Int) {
+    func updateEntryVisibility(
+        forWebViewId webViewId: ObjectIdentifier,
+        visibleInUI: Bool,
+        zPriority: Int,
+        showsAttachedOverlayChrome: Bool? = nil
+    ) {
         guard var entry = entriesByWebViewId[webViewId] else { return }
-        guard entry.visibleInUI != visibleInUI || entry.zPriority != zPriority else { return }
+        let resolvedShowsAttachedOverlayChrome = visibleInUI
+            ? (showsAttachedOverlayChrome ?? entry.showsAttachedOverlayChrome)
+            : false
+        guard entry.visibleInUI != visibleInUI ||
+            entry.zPriority != zPriority ||
+            entry.showsAttachedOverlayChrome != resolvedShowsAttachedOverlayChrome else { return }
         entry.visibleInUI = visibleInUI
         entry.zPriority = zPriority
+        entry.showsAttachedOverlayChrome = resolvedShowsAttachedOverlayChrome
         entriesByWebViewId[webViewId] = entry
+        entry.containerView?.setAttachedOverlayChrome(resolvedShowsAttachedOverlayChrome)
     }
 
     func isWebViewBoundToAnchor(withId webViewId: ObjectIdentifier, anchorView: NSView) -> Bool {
@@ -2838,7 +2940,9 @@ final class WindowBrowserPortal: NSObject {
         guard var entry = entriesByWebViewId[webViewId] else { return }
         entry.visibleInUI = false
         entry.zPriority = 0
+        entry.showsAttachedOverlayChrome = false
         entriesByWebViewId[webViewId] = entry
+        entry.containerView?.setAttachedOverlayChrome(false)
         synchronizeWebView(withId: webViewId, source: source)
     }
 
@@ -2921,7 +3025,13 @@ final class WindowBrowserPortal: NSObject {
         )
     }
 
-    func bind(webView: WKWebView, to anchorView: NSView, visibleInUI: Bool, zPriority: Int = 0) {
+    func bind(
+        webView: WKWebView,
+        to anchorView: NSView,
+        visibleInUI: Bool,
+        zPriority: Int = 0,
+        showsAttachedOverlayChrome: Bool = false
+    ) {
         guard ensureInstalled() else { return }
 
         let webViewId = ObjectIdentifier(webView)
@@ -2940,6 +3050,7 @@ final class WindowBrowserPortal: NSObject {
                 paneDropContext: nil,
                 searchOverlay: nil,
                 paneTopChromeHeight: 0,
+                showsAttachedOverlayChrome: false,
                 transientRecoveryReason: nil,
                 transientRecoveryRetriesRemaining: 0
             ),
@@ -2966,6 +3077,7 @@ final class WindowBrowserPortal: NSObject {
         }
 
         webViewByAnchorId[anchorId] = webViewId
+        let resolvedShowsAttachedOverlayChrome = visibleInUI && showsAttachedOverlayChrome
         entriesByWebViewId[webViewId] = Entry(
             webView: webView,
             containerView: containerView,
@@ -2976,9 +3088,12 @@ final class WindowBrowserPortal: NSObject {
             paneDropContext: previousEntry?.paneDropContext,
             searchOverlay: previousEntry?.searchOverlay,
             paneTopChromeHeight: previousEntry?.paneTopChromeHeight ?? 0,
+            showsAttachedOverlayChrome: resolvedShowsAttachedOverlayChrome,
             transientRecoveryReason: previousEntry?.transientRecoveryReason,
             transientRecoveryRetriesRemaining: previousEntry?.transientRecoveryRetriesRemaining ?? 0
         )
+
+        containerView.setAttachedOverlayChrome(resolvedShowsAttachedOverlayChrome)
 
         let didChangeAnchor: Bool = {
             guard let previousAnchor = previousEntry?.anchorView else { return true }
@@ -3587,6 +3702,7 @@ final class WindowBrowserPortal: NSObject {
             containerView.isHidden = false
         }
         containerView.setPaneTopChromeHeight(shouldHide ? 0 : entry.paneTopChromeHeight)
+        containerView.setAttachedOverlayChrome(!shouldHide && entry.showsAttachedOverlayChrome)
         containerView.setSearchOverlay(shouldHide ? nil : entry.searchOverlay)
         containerView.setPaneDropContext(containerView.isHidden ? nil : entry.paneDropContext)
         containerView.setDropZoneOverlay(zone: containerView.isHidden ? nil : entry.dropZone)
@@ -3857,7 +3973,13 @@ enum BrowserWindowPortalRegistry {
         return portal
     }
 
-    static func bind(webView: WKWebView, to anchorView: NSView, visibleInUI: Bool, zPriority: Int = 0) {
+    static func bind(
+        webView: WKWebView,
+        to anchorView: NSView,
+        visibleInUI: Bool,
+        zPriority: Int = 0,
+        showsAttachedOverlayChrome: Bool = false
+    ) {
         guard let window = anchorView.window else { return }
 
         let windowId = ObjectIdentifier(window)
@@ -3869,7 +3991,13 @@ enum BrowserWindowPortalRegistry {
             portalsByWindowId[oldWindowId]?.detachWebView(withId: webViewId)
         }
 
-        nextPortal.bind(webView: webView, to: anchorView, visibleInUI: visibleInUI, zPriority: zPriority)
+        nextPortal.bind(
+            webView: webView,
+            to: anchorView,
+            visibleInUI: visibleInUI,
+            zPriority: zPriority,
+            showsAttachedOverlayChrome: showsAttachedOverlayChrome
+        )
         webViewToWindowId[webViewId] = windowId
         pruneWebViewMappings(for: windowId, validWebViewIds: nextPortal.webViewIds())
         postRegistryDidChange(for: webView)
@@ -3893,11 +4021,21 @@ enum BrowserWindowPortalRegistry {
 
     /// Update visibleInUI/zPriority on an existing portal entry without rebinding.
     /// Called when a bind is deferred because the new host is temporarily off-window.
-    static func updateEntryVisibility(for webView: WKWebView, visibleInUI: Bool, zPriority: Int) {
+    static func updateEntryVisibility(
+        for webView: WKWebView,
+        visibleInUI: Bool,
+        zPriority: Int,
+        showsAttachedOverlayChrome: Bool? = nil
+    ) {
         let webViewId = ObjectIdentifier(webView)
         guard let windowId = webViewToWindowId[webViewId],
               let portal = portalsByWindowId[windowId] else { return }
-        portal.updateEntryVisibility(forWebViewId: webViewId, visibleInUI: visibleInUI, zPriority: zPriority)
+        portal.updateEntryVisibility(
+            forWebViewId: webViewId,
+            visibleInUI: visibleInUI,
+            zPriority: zPriority,
+            showsAttachedOverlayChrome: showsAttachedOverlayChrome
+        )
         postRegistryDidChange(for: webView)
     }
 

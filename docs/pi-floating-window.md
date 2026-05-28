@@ -98,8 +98,9 @@ cmux rpc pane.create '{
 }'
 ```
 
-The overlay has a 1 px black border. Browser overlays use the regular cmux
-browser panel, including the always-visible address bar.
+The overlay has a 2 px black border. Browser overlays use the regular cmux
+browser panel, including the always-visible address bar; their border is also
+mirrored in the browser portal layer so WebKit content cannot cover it.
 
 The Pi bridge can steer the overlay with standard socket methods:
 
