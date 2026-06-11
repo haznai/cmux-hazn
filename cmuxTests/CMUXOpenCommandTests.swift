@@ -65,6 +65,46 @@ final class CMUXOpenCommandTests: XCTestCase {
         XCTAssertEqual(result.stdout, "OK files=1 surface=surface-id pane=pane-id\n")
     }
 
+    func testNewWindowPreservesCommandArgumentsAfterTerminator() throws {
+        let cliPath = try bundledCLIPath()
+        let socketPath = makeSocketPath("newwin")
+        let listenerFD = try bindUnixSocket(at: socketPath)
+        let state = MockSocketServerState()
+
+        defer {
+            Darwin.close(listenerFD)
+            unlink(socketPath)
+        }
+
+        let serverHandled = startMockServer(listenerFD: listenerFD, state: state) { line in
+            guard let payload = Self.v2Payload(from: line),
+                  let id = payload["id"] as? String,
+                  let method = payload["method"] as? String else {
+                return Self.v2Response(id: "unknown", ok: false, error: ["code": "unexpected"])
+            }
+
+            guard method == "window.create" else {
+                return Self.v2Response(id: id, ok: false, error: ["code": "unexpected-method", "message": method])
+            }
+            return Self.v2Response(id: id, ok: true, result: ["window_id": "window-id"])
+        }
+
+        let result = runCLI(
+            cliPath: cliPath,
+            socketPath: socketPath,
+            arguments: ["new-window", "--floating", "--", "zsh", "-lc", "date; pwd", "it's fine", "--no-focus"]
+        )
+
+        wait(for: [serverHandled], timeout: 5)
+        XCTAssertFalse(result.timedOut, result.stderr)
+        XCTAssertEqual(result.status, 0, result.stderr)
+        let payload = try XCTUnwrap(Self.v2Payload(from: try XCTUnwrap(state.commands.first)))
+        let params = try XCTUnwrap(payload["params"] as? [String: Any])
+        XCTAssertEqual(params["floating"] as? Bool, true)
+        XCTAssertEqual(params["focus"] as? Bool, true)
+        XCTAssertEqual(params["initial_input"] as? String, "'zsh' '-lc' 'date; pwd' 'it'\"'\"'s fine' '--no-focus'\r")
+    }
+
     func testOpenCommandProcessesMixedTargetsInInputOrder() throws {
         let cliPath = try bundledCLIPath()
         let socketPath = makeSocketPath("open-order")

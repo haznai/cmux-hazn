@@ -3198,6 +3198,89 @@ final class WorkspaceSplitWorkingDirectoryTests: XCTestCase {
 
 
 @MainActor
+final class WorkspaceAttachedOverlayRoutingTests: XCTestCase {
+    func testFocusedAttachedOverlayResolvesSplitSourceToAnchorPaneSelection() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId) else {
+            XCTFail("Expected initial focused split surface")
+            return
+        }
+
+        guard let overlayPanel = workspace.newOverlayTerminalSurface(
+            overPane: sourcePaneId,
+            focus: true
+        ) else {
+            XCTFail("Expected attached overlay terminal")
+            return
+        }
+
+        XCTAssertEqual(workspace.focusedPanelId, overlayPanel.id)
+        XCTAssertEqual(workspace.panels.count, 2)
+        XCTAssertEqual(workspace.bonsplitSurfacePanelCount(), 1)
+        XCTAssertEqual(workspace.splitSourcePanelId(), sourcePanelId)
+        XCTAssertEqual(workspace.splitSourcePanelId(requestedPanelId: overlayPanel.id), sourcePanelId)
+    }
+
+    func testUnfocusedAttachedOverlayDoesNotOverrideFocusedSplitSource() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId) else {
+            XCTFail("Expected initial focused split surface")
+            return
+        }
+
+        guard let overlayPanel = workspace.newOverlayTerminalSurface(
+            overPane: sourcePaneId,
+            focus: false
+        ) else {
+            XCTFail("Expected attached overlay terminal")
+            return
+        }
+
+        XCTAssertNotEqual(workspace.focusedPanelId, overlayPanel.id)
+        XCTAssertEqual(workspace.splitSourcePanelId(), sourcePanelId)
+        XCTAssertEqual(workspace.splitSourcePanelId(requestedPanelId: overlayPanel.id), sourcePanelId)
+    }
+
+    func testLaunchingOverlayPreservesBackgroundedOverlayPanel() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId) else {
+            XCTFail("Expected initial focused split surface")
+            return
+        }
+
+        guard let firstOverlay = workspace.newOverlayTerminalSurface(
+            overPane: sourcePaneId,
+            focus: true
+        ) else {
+            XCTFail("Expected first attached overlay terminal")
+            return
+        }
+        XCTAssertTrue(workspace.backgroundAttachedOverlaySurface(firstOverlay.id))
+        XCTAssertEqual(workspace.backgroundedAttachedOverlaySurfaces[firstOverlay.id]?.isVisible, false)
+
+        guard let secondOverlay = workspace.newOverlayTerminalSurface(
+            overPane: sourcePaneId,
+            focus: true
+        ) else {
+            XCTFail("Expected second attached overlay terminal")
+            return
+        }
+
+        XCTAssertNotNil(workspace.panels[firstOverlay.id])
+        XCTAssertTrue(workspace.isAttachedOverlaySurface(firstOverlay.id))
+        XCTAssertEqual(workspace.attachedOverlaySurface?.id, secondOverlay.id)
+        XCTAssertEqual(workspace.backgroundedAttachedOverlaySurfaces[firstOverlay.id]?.isVisible, false)
+
+        XCTAssertTrue(workspace.focusAttachedOverlaySurface(firstOverlay.id))
+        XCTAssertEqual(workspace.attachedOverlaySurface?.id, firstOverlay.id)
+        XCTAssertEqual(workspace.backgroundedAttachedOverlaySurfaces[secondOverlay.id]?.isVisible, false)
+    }
+}
+
+@MainActor
 final class WorkspaceTerminalFocusRecoveryTests: XCTestCase {
     private func makeWindow() -> NSWindow {
         NSWindow(

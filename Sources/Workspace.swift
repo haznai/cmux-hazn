@@ -7141,6 +7141,7 @@ final class Workspace: Identifiable, ObservableObject {
 
     /// A script-created surface rendered over an existing pane without mutating the split tree.
     @Published var attachedOverlaySurface: WorkspaceAttachedOverlaySurface?
+    var backgroundedAttachedOverlaySurfaces: [UUID: WorkspaceAttachedOverlaySurface] = [:]
 
     /// Subscriptions for panel updates (e.g., browser title changes)
     var panelSubscriptions: [UUID: AnyCancellable] = [:]
@@ -7191,6 +7192,36 @@ final class Workspace: Identifiable, ObservableObject {
 
     func effectiveSelectedPanelId(inPane paneId: PaneID) -> UUID? {
         bonsplitController.selectedTab(inPane: paneId).flatMap { panelIdFromSurfaceId($0.id) }
+    }
+
+    func bonsplitSurfacePanelCount() -> Int {
+        Set(surfaceIdToPanelId.values).filter { panels[$0] != nil }.count
+    }
+
+    func splitSourcePanelId(requestedPanelId: UUID? = nil) -> UUID? {
+        if let requestedPanelId {
+            guard panels[requestedPanelId] != nil else { return nil }
+            if let overlay = attachedOverlayMetadata(forPanelId: requestedPanelId) {
+                return effectiveSelectedPanelId(inPane: overlay.anchorPaneId)
+            }
+            return surfaceIdFromPanelId(requestedPanelId) == nil ? nil : requestedPanelId
+        }
+
+        if let overlay = attachedOverlaySurface,
+           overlay.isVisible,
+           overlay.isFocused,
+           panels[overlay.id] != nil {
+            return effectiveSelectedPanelId(inPane: overlay.anchorPaneId)
+        }
+
+        if let focusedPanelId,
+           panels[focusedPanelId] != nil,
+           surfaceIdFromPanelId(focusedPanelId) != nil {
+            return focusedPanelId
+        }
+
+        guard let focusedPaneId = bonsplitController.focusedPaneId else { return nil }
+        return effectiveSelectedPanelId(inPane: focusedPaneId)
     }
 
     enum FocusPanelTrigger {
@@ -8040,14 +8071,15 @@ final class Workspace: Identifiable, ObservableObject {
         .receive(on: DispatchQueue.main)
         .sink { [weak self, weak browserPanel] _, _, isLoading, favicon in
             guard let self = self,
-                  let browserPanel = browserPanel,
-                  let tabId = self.surfaceIdFromPanelId(browserPanel.id) else { return }
+                  let browserPanel = browserPanel else { return }
             self.publishBrowserOpenTabSuggestion(for: browserPanel)
-            guard let existing = self.bonsplitController.tab(tabId) else { return }
             let nextTitle = browserPanel.displayTitle
             if self.panelTitles[browserPanel.id] != nextTitle {
                 self.panelTitles[browserPanel.id] = nextTitle
             }
+
+            guard let tabId = self.surfaceIdFromPanelId(browserPanel.id),
+                  let existing = self.bonsplitController.tab(tabId) else { return }
             let resolvedTitle = self.resolvedPanelTitle(panelId: browserPanel.id, fallback: nextTitle)
             let titleUpdate: String? = existing.title == resolvedTitle ? nil : resolvedTitle
             let faviconUpdate: Data?? = existing.iconImageData == favicon ? nil : .some(favicon)
@@ -10154,9 +10186,7 @@ final class Workspace: Identifiable, ObservableObject {
         tmuxStartCommand: String? = nil,
         piHaznShellControls: Bool = false
     ) -> TerminalPanel? {
-        if let existing = attachedOverlaySurface {
-            _ = closeAttachedOverlaySurface(existing.id, force: true)
-        }
+        replaceVisibleAttachedOverlaySurfaceIfNeeded()
 
         let sourcePanelId = effectiveSelectedPanelId(inPane: paneId)
         var inheritedConfig = inheritedTerminalConfig(preferredPanelId: sourcePanelId, inPane: paneId)
@@ -10447,9 +10477,7 @@ final class Workspace: Identifiable, ObservableObject {
             return nil
         }
 
-        if let existing = attachedOverlaySurface {
-            _ = closeAttachedOverlaySurface(existing.id, force: true)
-        }
+        replaceVisibleAttachedOverlaySurfaceIfNeeded()
 
         let sourcePanelId = effectiveSelectedPanelId(inPane: paneId)
         let browserPanel = BrowserPanel(
@@ -10466,6 +10494,7 @@ final class Workspace: Identifiable, ObservableObject {
         )
         panels[browserPanel.id] = browserPanel
         panelTitles[browserPanel.id] = browserPanel.displayTitle
+        installBrowserPanelSubscription(browserPanel)
         attachedOverlaySurface = WorkspaceAttachedOverlaySurface(
             id: browserPanel.id,
             anchorPaneId: paneId,
@@ -10473,8 +10502,6 @@ final class Workspace: Identifiable, ObservableObject {
             isVisible: true,
             piHaznShellControls: piHaznShellControls
         )
-        setPreferredBrowserProfileID(browserPanel.profileID)
-        publishBrowserOpenTabSuggestion(for: browserPanel)
         publishCmuxSurfaceCreated(
             browserPanel.id,
             paneId: paneId,
@@ -10817,20 +10844,54 @@ final class Workspace: Identifiable, ObservableObject {
         return closed
     }
 
+    func attachedOverlayMetadata(forPanelId panelId: UUID) -> WorkspaceAttachedOverlaySurface? {
+        if let overlay = attachedOverlaySurface, overlay.id == panelId {
+            return overlay
+        }
+        return backgroundedAttachedOverlaySurfaces[panelId]
+    }
+
     func isAttachedOverlaySurface(_ panelId: UUID) -> Bool {
-        attachedOverlaySurface?.id == panelId
+        attachedOverlayMetadata(forPanelId: panelId) != nil
+    }
+
+    private func replaceVisibleAttachedOverlaySurfaceIfNeeded() {
+        guard let existing = attachedOverlaySurface else { return }
+        if existing.isVisible {
+            _ = closeAttachedOverlaySurface(existing.id, force: true)
+        } else {
+            backgroundedAttachedOverlaySurfaces[existing.id] = existing
+            attachedOverlaySurface = nil
+        }
+    }
+
+    private func unfocusPanels(except focusedPanelId: UUID) {
+        for (id, panel) in panels where id != focusedPanelId {
+            panel.unfocus()
+        }
     }
 
     @discardableResult
     func focusAttachedOverlaySurface(_ panelId: UUID) -> Bool {
-        guard var overlay = attachedOverlaySurface,
-              overlay.id == panelId,
+        let existingOverlay = attachedOverlayMetadata(forPanelId: panelId)
+        guard var overlay = existingOverlay,
               let panel = panels[panelId] else {
             return false
         }
+        if let current = attachedOverlaySurface, current.id != panelId {
+            var backgrounded = current
+            backgrounded.isFocused = false
+            backgrounded.isVisible = false
+            backgroundedAttachedOverlaySurfaces[current.id] = backgrounded
+            if let currentPanel = panels[current.id] {
+                hideAttachedOverlayPortalView(panel: currentPanel, reason: "overlayReplaced")
+            }
+        }
+        backgroundedAttachedOverlaySurfaces.removeValue(forKey: panelId)
         overlay.isFocused = true
         overlay.isVisible = true
         attachedOverlaySurface = overlay
+        unfocusPanels(except: panelId)
         // Attached overlays are not bonsplit tabs. Focusing the anchor pane here
         // re-enters tab selection and can refocus the pane underneath the overlay.
         AppDelegate.shared?.noteMainPanelKeyboardFocusIntent(
@@ -10859,39 +10920,57 @@ final class Workspace: Identifiable, ObservableObject {
 
     @discardableResult
     func backgroundAttachedOverlaySurface(_ panelId: UUID? = nil) -> Bool {
-        guard var overlay = attachedOverlaySurface else { return false }
+        guard var overlay = panelId.flatMap({ attachedOverlayMetadata(forPanelId: $0) }) ?? attachedOverlaySurface else { return false }
         if let panelId, panelId != overlay.id { return false }
         guard let panel = panels[overlay.id] else {
-            attachedOverlaySurface = nil
+            if attachedOverlaySurface?.id == overlay.id { attachedOverlaySurface = nil }
+            backgroundedAttachedOverlaySurfaces.removeValue(forKey: overlay.id)
             return false
         }
 
+        let wasCurrentVisibleOverlay = attachedOverlaySurface?.id == overlay.id && overlay.isVisible
         overlay.isFocused = false
         overlay.isVisible = false
-        attachedOverlaySurface = overlay
+        backgroundedAttachedOverlaySurfaces[overlay.id] = overlay
+        if attachedOverlaySurface?.id == overlay.id {
+            attachedOverlaySurface = overlay
+        }
         hideAttachedOverlayPortalView(panel: panel, reason: "overlayBackground")
 
-        if let selectedPanelId = effectiveSelectedPanelId(inPane: overlay.anchorPaneId),
-           panels[selectedPanelId] != nil {
-            focusPanel(selectedPanelId)
-        } else {
-            bonsplitController.focusPane(overlay.anchorPaneId)
+        if wasCurrentVisibleOverlay {
+            if let selectedPanelId = effectiveSelectedPanelId(inPane: overlay.anchorPaneId),
+               panels[selectedPanelId] != nil {
+                focusPanel(selectedPanelId)
+            } else {
+                bonsplitController.focusPane(overlay.anchorPaneId)
+            }
         }
         return true
     }
 
     @discardableResult
     func closeAttachedOverlaySurface(_ panelId: UUID? = nil, force: Bool = false) -> Bool {
-        guard let overlay = attachedOverlaySurface else { return false }
+        let overlay: WorkspaceAttachedOverlaySurface?
+        if let panelId {
+            overlay = attachedOverlayMetadata(forPanelId: panelId)
+        } else {
+            overlay = attachedOverlaySurface
+        }
+        guard let overlay else { return false }
         if let panelId, panelId != overlay.id { return false }
         guard panels[overlay.id] != nil else {
-            attachedOverlaySurface = nil
+            if attachedOverlaySurface?.id == overlay.id { attachedOverlaySurface = nil }
+            backgroundedAttachedOverlaySurfaces.removeValue(forKey: overlay.id)
             return false
         }
 
         let overlayPanelId = overlay.id
         let overlayPanel = panels[overlayPanelId]
-        attachedOverlaySurface = nil
+        let wasCurrentOverlay = attachedOverlaySurface?.id == overlayPanelId
+        if wasCurrentOverlay {
+            attachedOverlaySurface = nil
+        }
+        backgroundedAttachedOverlaySurfaces.removeValue(forKey: overlayPanelId)
         discardClosedPanelLifecycleState(
             panelId: overlayPanelId,
             tabId: nil,
@@ -10905,11 +10984,13 @@ final class Workspace: Identifiable, ObservableObject {
             cleanupControllerSurfaceState: true
         )
 
-        if let selectedPanelId = effectiveSelectedPanelId(inPane: overlay.anchorPaneId),
-           panels[selectedPanelId] != nil {
-            focusPanel(selectedPanelId)
-        } else {
-            bonsplitController.focusPane(overlay.anchorPaneId)
+        if wasCurrentOverlay {
+            if let selectedPanelId = effectiveSelectedPanelId(inPane: overlay.anchorPaneId),
+               panels[selectedPanelId] != nil {
+                focusPanel(selectedPanelId)
+            } else {
+                bonsplitController.focusPane(overlay.anchorPaneId)
+            }
         }
         _ = force
         return true
@@ -10922,7 +11003,7 @@ final class Workspace: Identifiable, ObservableObject {
     }
 
     func paneId(forPanelId panelId: UUID) -> PaneID? {
-        if let overlay = attachedOverlaySurface, overlay.id == panelId {
+        if let overlay = attachedOverlayMetadata(forPanelId: panelId) {
             return overlay.anchorPaneId
         }
         guard let tabId = surfaceIdFromPanelId(panelId) else { return nil }
@@ -13291,9 +13372,7 @@ extension Workspace: BonsplitDelegate {
         syncUnreadBadgeStateForPanel(selectedPanelId)
 
         // Unfocus all other panels
-        for (id, p) in panels where id != effectiveFocusedPanelId {
-            p.unfocus()
-        }
+        unfocusPanels(except: effectiveFocusedPanelId)
 
         // Explicitly hide browser portals for deselected tabs in this pane.
         // Bonsplit's keepAllAlive mode hides non-selected tabs via SwiftUI .opacity(0),

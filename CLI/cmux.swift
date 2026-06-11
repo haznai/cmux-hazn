@@ -2702,11 +2702,14 @@ struct CMUXCLI {
             }
 
         case "new-window":
-            let floating = commandArgs.contains("--floating") || commandArgs.contains("--always-on-top")
-            let noFocus = commandArgs.contains("--no-focus")
-            let argsWithoutBoolFlags = commandArgs.filter {
+            let terminatorIndex = commandArgs.firstIndex(of: "--")
+            let optionArgs = terminatorIndex.map { Array(commandArgs[..<$0]) } ?? commandArgs
+            let trailingCommandArgs = terminatorIndex.map { Array(commandArgs[commandArgs.index(after: $0)...]) } ?? []
+            let floating = optionArgs.contains("--floating") || optionArgs.contains("--always-on-top")
+            let noFocus = optionArgs.contains("--no-focus")
+            let argsWithoutBoolFlags = optionArgs.filter {
                 $0 != "--floating" && $0 != "--always-on-top" && $0 != "--no-focus"
-            }
+            } + (terminatorIndex == nil ? [] : ["--"] + trailingCommandArgs)
             let (commandOpt, rem0) = parseOption(argsWithoutBoolFlags, name: "--command")
             let (cwdOpt, rem1) = parseOption(rem0, name: "--cwd")
             let (nameOpt, rem2) = parseOption(rem1, name: "--name")
@@ -2723,7 +2726,7 @@ struct CMUXCLI {
                 guard let terminator = remaining.firstIndex(of: "--") else { return nil }
                 let commandParts = remaining.dropFirst(terminator + 1)
                 guard !commandParts.isEmpty else { return nil }
-                return commandParts.joined(separator: " ")
+                return commandParts.map(shellSingleQuote).joined(separator: " ")
             }()
             if noFocus, focusOpt != nil {
                 throw CLIError(message: "new-window: use either --no-focus or --focus, not both")
@@ -10406,6 +10409,11 @@ struct CMUXCLI {
             .replacingOccurrences(of: "\r", with: "\\r")
         return "\"\(escaped)\""
     }
+
+    private func shellSingleQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+    }
+
     func parseOption(_ args: [String], name: String) -> (String?, [String]) {
         var remaining: [String] = []
         var value: String?

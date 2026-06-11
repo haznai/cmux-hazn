@@ -653,6 +653,7 @@ final class WindowTerminalPortal: NSObject {
     private static let minimumRevealWidth: CGFloat = 24
     private static let minimumRevealHeight: CGFloat = 18
     private static let transientRecoveryRetryBudget: Int = 12
+    private static let browserOverlayHostZPriorityThreshold: Int = 100
 #if CMUX_ISSUE_483_PORTAL_RECOVERY
     private static let transientRecoveryEnabled = true
 #else
@@ -845,6 +846,12 @@ final class WindowTerminalPortal: NSObject {
         reconcileVisibleHostedViewsAfterGeometrySync(reason: "portal.externalGeometrySync")
     }
 
+    private var shouldPlaceHostAboveBrowserPortal: Bool {
+        entriesByHostedId.values.contains { entry in
+            entry.visibleInUI && entry.zPriority >= Self.browserOverlayHostZPriorityThreshold
+        }
+    }
+
     private func ensureDividerOverlayOnTop() {
         if dividerOverlayView.superview !== hostView {
             dividerOverlayView.frame = hostView.bounds
@@ -873,11 +880,7 @@ final class WindowTerminalPortal: NSObject {
             installConstraints.removeAll()
 
             hostView.removeFromSuperview()
-            if let browserHost {
-                container.addSubview(hostView, positioned: .below, relativeTo: browserHost)
-            } else {
-                container.addSubview(hostView, positioned: .above, relativeTo: reference)
-            }
+            container.addSubview(hostView, positioned: .above, relativeTo: reference)
 
             installConstraints = [
                 hostView.leadingAnchor.constraint(equalTo: reference.leadingAnchor),
@@ -888,13 +891,8 @@ final class WindowTerminalPortal: NSObject {
             NSLayoutConstraint.activate(installConstraints)
             installedContainerView = container
             installedReferenceView = reference
-        } else if let browserHost {
-            if !Self.isView(browserHost, above: hostView, in: container) {
-                container.addSubview(hostView, positioned: .below, relativeTo: browserHost)
-            }
-        } else if !Self.isView(hostView, above: reference, in: container) {
-            container.addSubview(hostView, positioned: .above, relativeTo: reference)
         }
+        synchronizeHostLayerOrdering(in: container, reference: reference, browserHost: browserHost)
 
         // Keep the drag/mouse forwarding overlay above portal-hosted terminal views.
         if let overlay = objc_getAssociatedObject(window, &fileDropOverlayKey) as? NSView,
@@ -924,6 +922,34 @@ final class WindowTerminalPortal: NSObject {
         }
 
         return (container, reference)
+    }
+
+    private func synchronizeHostLayerOrderingIfPossible() {
+        guard let container = installedContainerView,
+              let reference = installedReferenceView else { return }
+        synchronizeHostLayerOrdering(
+            in: container,
+            reference: reference,
+            browserHost: preferredBrowserHost(in: container)
+        )
+    }
+
+    private func synchronizeHostLayerOrdering(
+        in container: NSView,
+        reference: NSView,
+        browserHost: WindowBrowserHostView?
+    ) {
+        if let browserHost {
+            if shouldPlaceHostAboveBrowserPortal {
+                if !Self.isView(hostView, above: browserHost, in: container) {
+                    container.addSubview(hostView, positioned: .above, relativeTo: browserHost)
+                }
+            } else if !Self.isView(browserHost, above: hostView, in: container) {
+                container.addSubview(hostView, positioned: .below, relativeTo: browserHost)
+            }
+        } else if !Self.isView(hostView, above: reference, in: container) {
+            container.addSubview(hostView, positioned: .above, relativeTo: reference)
+        }
     }
 
     private func installationTarget(for window: NSWindow) -> (container: NSView, reference: NSView)? {
@@ -1081,6 +1107,7 @@ final class WindowTerminalPortal: NSObject {
         if let hostedView = entry.hostedView, hostedView.superview === hostView {
             hostedView.removeFromSuperview()
         }
+        synchronizeHostLayerOrderingIfPossible()
     }
 
     /// Hide a portal entry without detaching it. Updates visibleInUI to false and
@@ -1092,6 +1119,7 @@ final class WindowTerminalPortal: NSObject {
         entry.transientRecoveryRetriesRemaining = 0
         entriesByHostedId[hostedId] = entry
         entry.hostedView?.isHidden = true
+        synchronizeHostLayerOrderingIfPossible()
 #if DEBUG
         cmuxDebugLog("portal.hideEntry hosted=\(portalDebugToken(entry.hostedView)) reason=workspaceUnmount")
 #endif
@@ -1107,6 +1135,7 @@ final class WindowTerminalPortal: NSObject {
             entry.transientRecoveryRetriesRemaining = 0
         }
         entriesByHostedId[hostedId] = entry
+        synchronizeHostLayerOrderingIfPossible()
     }
 
     func isHostedViewBoundToAnchor(withId hostedId: ObjectIdentifier, anchorView: NSView) -> Bool {
@@ -1149,6 +1178,7 @@ final class WindowTerminalPortal: NSObject {
             zPriority: zPriority,
             transientRecoveryRetriesRemaining: 0
         )
+        synchronizeHostLayerOrderingIfPossible()
 
         let didChangeAnchor: Bool = {
             guard let previousAnchor = previousEntry?.anchorView else { return true }

@@ -4284,8 +4284,9 @@ class TerminalController {
         }) else {
             return .err(code: "internal_error", message: "Failed to create window", data: nil)
         }
-        // The new window should become key, but setActiveTabManager defensively.
-        if let tm = v2MainSync({ AppDelegate.shared?.tabManagerFor(windowId: windowId) }) {
+        // Only focus-intent window creation may change the script focus context.
+        if shouldActivate,
+           let tm = v2MainSync({ AppDelegate.shared?.tabManagerFor(windowId: windowId) }) {
             setActiveTabManager(tm)
         }
         var payload: [String: Any] = [
@@ -6017,10 +6018,9 @@ class TerminalController {
             let focusedSurfaceId = ws.focusedPanelId
             let panels = orderedPanels(in: ws)
             let surfaces: [[String: Any]] = panels.enumerated().map { index, panel in
-                let isAttachedOverlay = ws.isAttachedOverlaySurface(panel.id)
-                let overlayVisible = ws.attachedOverlaySurface?.id == panel.id
-                    ? (ws.attachedOverlaySurface?.isVisible ?? false)
-                    : true
+                let overlayMetadata = ws.attachedOverlayMetadata(forPanelId: panel.id)
+                let isAttachedOverlay = overlayMetadata != nil
+                let overlayVisible = overlayMetadata?.isVisible ?? true
                 let paneUUID = paneByPanelId[panel.id] ?? ws.paneId(forPanelId: panel.id)?.id
                 var item: [String: Any] = [
                     "id": panel.id.uuidString,
@@ -6040,7 +6040,7 @@ class TerminalController {
                     item["developer_tools_visible"] = browserPanel.isDeveloperToolsVisible()
                 }
                 if isAttachedOverlay {
-                    item["pi_hazn_shell_controls"] = ws.attachedOverlaySurface?.piHaznShellControls ?? false
+                    item["pi_hazn_shell_controls"] = overlayMetadata?.piHaznShellControls ?? false
                 }
                 if let terminalPanel = panel as? TerminalPanel {
                     item["requested_working_directory"] = v2OrNull(v2NonEmptyString(terminalPanel.requestedWorkingDirectory))
@@ -6157,8 +6157,7 @@ class TerminalController {
 
             let surfaceId = v2UUID(params, "surface_id") ?? ws.attachedOverlaySurface?.id
             guard let surfaceId,
-                  let overlay = ws.attachedOverlaySurface,
-                  overlay.id == surfaceId,
+                  let overlay = ws.attachedOverlayMetadata(forPanelId: surfaceId),
                   ws.panels[surfaceId] != nil else {
                 result = .err(code: "not_found", message: "Surface is not an attached overlay", data: nil)
                 return
@@ -6213,17 +6212,12 @@ class TerminalController {
                 return
             }
             let requestedSurfaceId: UUID? = v2UUID(params, "surface_id")
-            let targetSurfaceId: UUID?
-            if let requestedSurfaceId {
-                guard ws.panels[requestedSurfaceId] != nil else {
-                    result = .err(code: "not_found", message: "Surface not found", data: ["surface_id": requestedSurfaceId.uuidString])
-                    return
-                }
-                targetSurfaceId = requestedSurfaceId
-            } else {
-                targetSurfaceId = ws.focusedPanelId
+            if let requestedSurfaceId, ws.panels[requestedSurfaceId] == nil {
+                result = .err(code: "not_found", message: "Surface not found", data: ["surface_id": requestedSurfaceId.uuidString])
+                return
             }
-            guard let targetSurfaceId, ws.panels[targetSurfaceId] != nil else {
+            guard let targetSurfaceId = ws.splitSourcePanelId(requestedPanelId: requestedSurfaceId),
+                  ws.panels[targetSurfaceId] != nil else {
                 result = .err(code: "not_found", message: "No focused surface", data: nil)
                 return
             }
@@ -6372,7 +6366,7 @@ class TerminalController {
                 return
             }
 
-            if !ws.isAttachedOverlaySurface(surfaceId), ws.panels.count <= 1 {
+            if !ws.isAttachedOverlaySurface(surfaceId), ws.bonsplitSurfacePanelCount() <= 1 {
                 result = .err(code: "invalid_state", message: "Cannot close the last surface", data: nil)
                 return
             }
@@ -7611,9 +7605,40 @@ class TerminalController {
             let requestedPaneId = v2UUID(params, "pane_id")
 
             if wantsOverlay {
-                let anchorPane = requestedPaneId
-                    .flatMap { paneUUID in ws.bonsplitController.allPaneIds.first(where: { $0.id == paneUUID }) }
-                    ?? requestedPanelId.flatMap { ws.paneId(forPanelId: $0) }
+                if v2HasNonNullParam(params, "pane_id"), requestedPaneId == nil {
+                    result = .err(code: "invalid_params", message: "Invalid pane_id", data: nil)
+                    return
+                }
+                if v2HasNonNullParam(params, "surface_id"), requestedPanelId == nil {
+                    result = .err(code: "invalid_params", message: "Invalid surface_id", data: nil)
+                    return
+                }
+
+                let explicitPane = requestedPaneId.flatMap { paneUUID in
+                    ws.bonsplitController.allPaneIds.first(where: { $0.id == paneUUID })
+                }
+                if let requestedPaneId, explicitPane == nil {
+                    result = .err(code: "not_found", message: "Pane not found", data: ["pane_id": requestedPaneId.uuidString])
+                    return
+                }
+
+                let explicitSurfacePane = requestedPanelId.flatMap { panelId -> PaneID? in
+                    guard ws.panels[panelId] != nil else { return nil }
+                    return ws.paneId(forPanelId: panelId)
+                }
+                if let requestedPanelId {
+                    guard ws.panels[requestedPanelId] != nil else {
+                        result = .err(code: "not_found", message: "Surface not found", data: ["surface_id": requestedPanelId.uuidString])
+                        return
+                    }
+                    guard explicitSurfacePane != nil else {
+                        result = .err(code: "not_found", message: "Surface has no pane", data: ["surface_id": requestedPanelId.uuidString])
+                        return
+                    }
+                }
+
+                let anchorPane = explicitPane
+                    ?? explicitSurfacePane
                     ?? ws.attachedOverlaySurface?.anchorPaneId
                     ?? ws.bonsplitController.focusedPaneId
                     ?? ws.bonsplitController.allPaneIds.first
@@ -7663,20 +7688,7 @@ class TerminalController {
                 return
             }
 
-            let splitSourcePanelId: UUID? = {
-                if let requestedPanelId, ws.panels[requestedPanelId] != nil {
-                    if ws.isAttachedOverlaySurface(requestedPanelId),
-                       let anchorPane = ws.paneId(forPanelId: requestedPanelId) {
-                        return ws.effectiveSelectedPanelId(inPane: anchorPane)
-                    }
-                    return requestedPanelId
-                }
-                if let overlay = ws.attachedOverlaySurface,
-                   ws.panels[overlay.id] != nil {
-                    return ws.effectiveSelectedPanelId(inPane: overlay.anchorPaneId)
-                }
-                return ws.focusedPanelId
-            }()
+            let splitSourcePanelId = ws.splitSourcePanelId(requestedPanelId: requestedPanelId)
 
             guard let sourcePanelId = splitSourcePanelId,
                   ws.panels[sourcePanelId] != nil,
@@ -9147,13 +9159,13 @@ class TerminalController {
             v2MaybeFocusWindow(for: tabManager)
             v2MaybeSelectWorkspace(tabManager, workspace: ws)
 
-            let sourceSurfaceId = v2UUID(params, "surface_id") ?? ws.focusedPanelId
-            guard let sourceSurfaceId else {
-                result = .err(code: "not_found", message: "No focused surface to split", data: nil)
+            let requestedSurfaceId = v2UUID(params, "surface_id")
+            if let requestedSurfaceId, ws.panels[requestedSurfaceId] == nil {
+                result = .err(code: "not_found", message: "Source surface not found", data: ["surface_id": requestedSurfaceId.uuidString])
                 return
             }
-            guard ws.panels[sourceSurfaceId] != nil else {
-                result = .err(code: "not_found", message: "Source surface not found", data: ["surface_id": sourceSurfaceId.uuidString])
+            guard let sourceSurfaceId = ws.splitSourcePanelId(requestedPanelId: requestedSurfaceId) else {
+                result = .err(code: "not_found", message: "No focused surface to split", data: nil)
                 return
             }
 
@@ -9254,13 +9266,13 @@ class TerminalController {
             v2MaybeFocusWindow(for: tabManager)
             v2MaybeSelectWorkspace(tabManager, workspace: ws)
 
-            let sourceSurfaceId = v2UUID(params, "surface_id") ?? ws.focusedPanelId
-            guard let sourceSurfaceId else {
-                result = .err(code: "not_found", message: "No focused surface to split", data: nil)
+            let requestedSurfaceId = v2UUID(params, "surface_id")
+            if let requestedSurfaceId, ws.panels[requestedSurfaceId] == nil {
+                result = .err(code: "not_found", message: "Source surface not found", data: ["surface_id": requestedSurfaceId.uuidString])
                 return
             }
-            guard ws.panels[sourceSurfaceId] != nil else {
-                result = .err(code: "not_found", message: "Source surface not found", data: ["surface_id": sourceSurfaceId.uuidString])
+            guard let sourceSurfaceId = ws.splitSourcePanelId(requestedPanelId: requestedSurfaceId) else {
+                result = .err(code: "not_found", message: "No focused surface to split", data: nil)
                 return
             }
 
@@ -14324,19 +14336,19 @@ class TerminalController {
                 return
             }
 
-            // If panel arg provided, resolve it; otherwise use focused panel
-            let surfaceId: UUID?
+            // If panel arg provided, resolve it; otherwise use the focused split surface.
+            let requestedSurfaceId: UUID?
             if !panelArg.isEmpty {
-                surfaceId = resolveSurfaceId(from: panelArg, tab: tab)
-                if surfaceId == nil {
+                requestedSurfaceId = resolveSurfaceId(from: panelArg, tab: tab)
+                if requestedSurfaceId == nil {
                     result = "ERROR: Panel not found"
                     return
                 }
             } else {
-                surfaceId = tab.focusedPanelId
+                requestedSurfaceId = nil
             }
 
-            guard let targetSurface = surfaceId else {
+            guard let targetSurface = tab.splitSourcePanelId(requestedPanelId: requestedSurfaceId) else {
                 result = "ERROR: No surface to split"
                 return
             }
