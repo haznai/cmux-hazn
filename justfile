@@ -15,6 +15,10 @@ rebuild-open:
 smoke-open:
   @./scripts/cmux-haznfloat --rebuild --smoke
 
+# Build this checkout in Release configuration and install it through a local Homebrew cask named mcux.
+mcux *args:
+  @./scripts/homebrew-install-dev-build.sh {{args}}
+
 # Print the short workflow for continuing Pi/cmux overlay work.
 work:
   @printf '%s\n' \
