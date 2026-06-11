@@ -7086,7 +7086,7 @@ struct ClosedBrowserPanelRestoreSnapshot {
 
 struct WorkspaceAttachedOverlaySurface: Identifiable, Equatable {
     let id: UUID
-    let anchorPaneId: PaneID
+    var anchorPaneId: PaneID
     var isFocused: Bool
     var isVisible: Bool = true
     var piHaznShellControls: Bool = false
@@ -10808,6 +10808,7 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         if let tabId = surfaceIdFromPanelId(panelId) {
+            reanchorAttachedOverlaysIfNeeded(beforeClosingSplitPanel: panelId)
             // Close the tab in bonsplit (this triggers delegate callback)
             return requestCloseTab(tabId, force: force)
         }
@@ -10994,6 +10995,35 @@ final class Workspace: Identifiable, ObservableObject {
         }
         _ = force
         return true
+    }
+
+    private func reanchorAttachedOverlaysIfNeeded(beforeClosingSplitPanel panelId: UUID) {
+        guard let closingTabId = surfaceIdFromPanelId(panelId),
+              let closingPane = paneId(forPanelId: panelId) else { return }
+        let tabsInClosingPane = bonsplitController.tabs(inPane: closingPane)
+        guard tabsInClosingPane.count == 1,
+              tabsInClosingPane.first?.id == closingTabId,
+              let replacementPane = replacementOverlayAnchorPane(excluding: closingPane) else { return }
+
+        if var overlay = attachedOverlaySurface,
+           overlay.anchorPaneId.id == closingPane.id {
+            overlay.anchorPaneId = replacementPane
+            attachedOverlaySurface = overlay
+        }
+
+        for (overlayId, overlay) in backgroundedAttachedOverlaySurfaces where overlay.anchorPaneId.id == closingPane.id {
+            var reanchored = overlay
+            reanchored.anchorPaneId = replacementPane
+            backgroundedAttachedOverlaySurfaces[overlayId] = reanchored
+        }
+    }
+
+    private func replacementOverlayAnchorPane(excluding pane: PaneID) -> PaneID? {
+        if let focusedPane = bonsplitController.focusedPaneId,
+           focusedPane.id != pane.id {
+            return focusedPane
+        }
+        return bonsplitController.allPaneIds.first { $0.id != pane.id }
     }
 
     func requestCloseTab(_ tabId: TabID, force: Bool) -> Bool {

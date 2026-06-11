@@ -101,6 +101,32 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         XCTAssertTrue(focusV2.insideAllowsFocus)
         XCTAssertFalse(focusV2.outsideSuppressed)
 
+        let defaultFocusWindowCreate = TerminalController.debugSocketCommandPolicySnapshot(
+            commandKey: "window.create",
+            isV2: true
+        )
+        XCTAssertTrue(defaultFocusWindowCreate.insideSuppressed)
+        XCTAssertTrue(defaultFocusWindowCreate.insideAllowsFocus)
+        XCTAssertFalse(defaultFocusWindowCreate.outsideSuppressed)
+
+        let noFocusWindowCreate = TerminalController.debugSocketCommandPolicySnapshot(
+            commandKey: "window.create",
+            isV2: true,
+            params: ["focus": false]
+        )
+        XCTAssertTrue(noFocusWindowCreate.insideSuppressed)
+        XCTAssertFalse(noFocusWindowCreate.insideAllowsFocus)
+        XCTAssertFalse(noFocusWindowCreate.outsideSuppressed)
+
+        let activateFalseWindowCreate = TerminalController.debugSocketCommandPolicySnapshot(
+            commandKey: "window.create",
+            isV2: true,
+            params: ["activate": false]
+        )
+        XCTAssertTrue(activateFalseWindowCreate.insideSuppressed)
+        XCTAssertFalse(activateFalseWindowCreate.insideAllowsFocus)
+        XCTAssertFalse(activateFalseWindowCreate.outsideSuppressed)
+
         let triggerFlash = TerminalController.debugSocketCommandPolicySnapshot(
             commandKey: "surface.trigger_flash",
             isV2: true

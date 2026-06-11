@@ -3278,6 +3278,35 @@ final class WorkspaceAttachedOverlayRoutingTests: XCTestCase {
         XCTAssertEqual(workspace.attachedOverlaySurface?.id, firstOverlay.id)
         XCTAssertEqual(workspace.backgroundedAttachedOverlaySurfaces[secondOverlay.id]?.isVisible, false)
     }
+
+    func testOverlayReanchorsBeforeClosingAnchorPanesLastSplitSurface() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId) else {
+            XCTFail("Expected initial focused split surface")
+            return
+        }
+        guard let survivingPanel = workspace.newTerminalSplit(
+            from: sourcePanelId,
+            orientation: .horizontal,
+            focus: false
+        ), let survivingPaneId = workspace.paneId(forPanelId: survivingPanel.id) else {
+            XCTFail("Expected split terminal panel")
+            return
+        }
+        guard let overlayPanel = workspace.newOverlayTerminalSurface(
+            overPane: sourcePaneId,
+            focus: true
+        ) else {
+            XCTFail("Expected attached overlay terminal")
+            return
+        }
+        XCTAssertEqual(workspace.attachedOverlaySurface?.anchorPaneId.id, sourcePaneId.id)
+
+        XCTAssertTrue(workspace.closePanel(sourcePanelId, force: true))
+
+        XCTAssertEqual(workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.anchorPaneId.id, survivingPaneId.id)
+    }
 }
 
 @MainActor

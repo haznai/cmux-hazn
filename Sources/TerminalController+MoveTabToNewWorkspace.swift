@@ -97,11 +97,29 @@ extension TerminalController {
     ]
 
     nonisolated static func explicitFocusParamAllowsFocus(commandKey: String, params: [String: Any]) -> Bool {
-        explicitFocusParamV2Methods.contains(commandKey) && explicitFocusParamValue(params)
+        guard explicitFocusParamV2Methods.contains(commandKey) else { return false }
+        if commandKey == "window.create" {
+            return windowCreateFocusParamValue(params)
+        }
+        return explicitFocusParamValue(params)
+    }
+
+    private nonisolated static func windowCreateFocusParamValue(_ params: [String: Any]) -> Bool {
+        if let raw = params["focus"] {
+            return boolFocusParamValue(raw)
+        }
+        if let raw = params["activate"] {
+            return boolFocusParamValue(raw)
+        }
+        return true
     }
 
     private nonisolated static func explicitFocusParamValue(_ params: [String: Any]) -> Bool {
         guard let raw = params["focus"] else { return false }
+        return boolFocusParamValue(raw)
+    }
+
+    private nonisolated static func boolFocusParamValue(_ raw: Any) -> Bool {
         if let bool = raw as? Bool { return bool }
         if let number = raw as? NSNumber { return number.boolValue }
         if let string = raw as? String {

@@ -6155,7 +6155,13 @@ class TerminalController {
                 return
             }
 
-            let surfaceId = v2UUID(params, "surface_id") ?? ws.attachedOverlaySurface?.id
+            let requestedSurfaceId = v2UUID(params, "surface_id")
+            if v2HasNonNullParam(params, "surface_id"), requestedSurfaceId == nil {
+                result = .err(code: "invalid_params", message: "Invalid surface_id", data: nil)
+                return
+            }
+
+            let surfaceId = requestedSurfaceId ?? ws.attachedOverlaySurface?.id
             guard let surfaceId,
                   let overlay = ws.attachedOverlayMetadata(forPanelId: surfaceId),
                   ws.panels[surfaceId] != nil else {
@@ -7637,9 +7643,12 @@ class TerminalController {
                     }
                 }
 
+                let visibleOverlayAnchorPane = ws.attachedOverlaySurface.flatMap { overlay in
+                    overlay.isVisible ? overlay.anchorPaneId : nil
+                }
                 let anchorPane = explicitPane
                     ?? explicitSurfacePane
-                    ?? ws.attachedOverlaySurface?.anchorPaneId
+                    ?? visibleOverlayAnchorPane
                     ?? ws.bonsplitController.focusedPaneId
                     ?? ws.bonsplitController.allPaneIds.first
                 guard let anchorPane else {
