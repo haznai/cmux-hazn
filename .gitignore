@@ -11,7 +11,10 @@ xcuserdata/
 # Local env
 .env
 .envrc
+!.envrc
 !web/.envrc
+.devenv/
+.direnv/
 
 # Swift Package Manager
 .swiftpm/
