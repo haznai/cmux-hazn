@@ -784,6 +784,45 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         XCTAssertEqual(workspace.bonsplitSurfacePanelCount(), 1)
     }
 
+    func testPaneCreateRejectsUnknownPlacement() async throws {
+        let socketPath = makeSocketPath("pane-placement")
+        let manager = TabManager()
+        let workspace = manager.addWorkspace(select: true)
+
+        defer {
+            if manager.tabs.contains(where: { $0.id == workspace.id }) {
+                manager.closeWorkspace(workspace)
+            }
+        }
+
+        XCTAssertEqual(workspace.bonsplitSurfacePanelCount(), 1)
+
+        TerminalController.shared.start(
+            tabManager: manager,
+            socketPath: socketPath,
+            accessMode: .allowAll
+        )
+        try waitForSocket(at: socketPath)
+
+        let response = try await sendV2RequestAsync(
+            method: "pane.create",
+            params: [
+                "workspace_id": workspace.id.uuidString,
+                "placement": "overaly",
+                "direction": "right"
+            ],
+            to: socketPath
+        )
+
+        XCTAssertEqual(response["ok"] as? Bool, false, "Unexpected JSON-RPC response: \(response)")
+        let error = try XCTUnwrap(response["error"] as? [String: Any], "Expected invalid placement response")
+        XCTAssertEqual(error["code"] as? String, "invalid_params")
+        let data = try XCTUnwrap(error["data"] as? [String: Any], "Expected invalid placement data")
+        XCTAssertEqual(data["placement"] as? String, "overaly")
+        XCTAssertEqual(workspace.bonsplitSurfacePanelCount(), 1)
+        XCTAssertEqual(workspace.panels.count, 1)
+    }
+
     func testSurfaceRelayRPCsRejectExplicitUnknownSurfaceID() async throws {
         let socketPath = makeSocketPath("relay-invalid")
         let manager = TabManager()

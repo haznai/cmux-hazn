@@ -7589,11 +7589,16 @@ class TerminalController {
             return .err(code: "unavailable", message: "TabManager not available", data: nil)
         }
         let placement = v2String(params, "placement")?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let wantsOverlay = placement == "overlay" ||
-            placement == "attached_overlay" ||
-            placement == "attached-overlay" ||
-            placement == "over_pane" ||
-            placement == "over-pane"
+        let overlayPlacements: Set<String> = ["overlay", "attached_overlay", "attached-overlay", "over_pane", "over-pane"]
+        let splitPlacements: Set<String> = ["split"]
+        let wantsOverlay = placement.map { overlayPlacements.contains($0) } ?? false
+        if let placement, !placement.isEmpty, !wantsOverlay, !splitPlacements.contains(placement) {
+            return .err(
+                code: "invalid_params",
+                message: "Invalid placement (split|overlay)",
+                data: ["placement": placement]
+            )
+        }
         let direction = v2String(params, "direction").flatMap(parseSplitDirection)
         if !wantsOverlay && direction == nil {
             return .err(code: "invalid_params", message: "Missing or invalid direction (left|right|up|down)", data: nil)
