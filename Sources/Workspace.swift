@@ -10881,6 +10881,13 @@ final class Workspace: Identifiable, ObservableObject {
         panels[overlay.id]?.unfocus()
     }
 
+    func focusPane(_ paneId: PaneID, clearOverlayFocus: Bool = true) {
+        if clearOverlayFocus {
+            clearAttachedOverlayFocusIfNeeded()
+        }
+        bonsplitController.focusPane(paneId)
+    }
+
     @discardableResult
     func focusAttachedOverlaySurface(_ panelId: UUID) -> Bool {
         let existingOverlay = attachedOverlayMetadata(forPanelId: panelId)
@@ -10977,6 +10984,7 @@ final class Workspace: Identifiable, ObservableObject {
         let overlayPanelId = overlay.id
         let overlayPanel = panels[overlayPanelId]
         let wasCurrentOverlay = attachedOverlaySurface?.id == overlayPanelId
+        let shouldRestoreAnchorFocus = wasCurrentOverlay && overlay.isVisible && overlay.isFocused
         if wasCurrentOverlay {
             attachedOverlaySurface = nil
         }
@@ -10994,12 +11002,12 @@ final class Workspace: Identifiable, ObservableObject {
             cleanupControllerSurfaceState: true
         )
 
-        if wasCurrentOverlay {
+        if shouldRestoreAnchorFocus {
             if let selectedPanelId = effectiveSelectedPanelId(inPane: overlay.anchorPaneId),
                panels[selectedPanelId] != nil {
                 focusPanel(selectedPanelId)
             } else {
-                bonsplitController.focusPane(overlay.anchorPaneId)
+                focusPane(overlay.anchorPaneId, clearOverlayFocus: false)
             }
         }
         _ = force

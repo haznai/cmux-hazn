@@ -7526,7 +7526,7 @@ class TerminalController {
             if tabManager.selectedTabId != ws.id {
                 tabManager.selectWorkspace(ws)
             }
-            ws.bonsplitController.focusPane(paneId)
+            ws.focusPane(paneId)
             let windowId = v2ResolveWindowId(tabManager: tabManager)
             result = .ok(["window_id": v2OrNull(windowId?.uuidString), "window_ref": v2Ref(kind: .window, uuid: windowId), "workspace_id": ws.id.uuidString, "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id), "pane_id": paneId.id.uuidString, "pane_ref": v2Ref(kind: .pane, uuid: paneId.id)])
         }
@@ -7986,7 +7986,7 @@ class TerminalController {
             }
 
             if focus {
-                workspace.bonsplitController.focusPane(targetPane)
+                workspace.focusPane(targetPane)
             }
             let windowId = located.windowId
             result = .ok([
@@ -8144,7 +8144,7 @@ class TerminalController {
                 return
             }
 
-            ws.bonsplitController.focusPane(target)
+            ws.focusPane(target)
             let selectedSurfaceId = ws.bonsplitController.selectedTab(inPane: target).flatMap { ws.panelIdFromSurfaceId($0.id) }
             let windowId = v2ResolveWindowId(tabManager: tabManager)
             result = .ok([
@@ -16072,10 +16072,10 @@ class TerminalController {
             // Try UUID first, then fall back to index
             if let uuid = UUID(uuidString: paneArg),
                let paneId = paneIds.first(where: { $0.id == uuid }) {
-                tab.bonsplitController.focusPane(paneId)
+                tab.focusPane(paneId)
                 result = "OK"
             } else if let index = Int(paneArg), index >= 0, index < paneIds.count {
-                tab.bonsplitController.focusPane(paneIds[index])
+                tab.focusPane(paneIds[index])
                 result = "OK"
             }
         }

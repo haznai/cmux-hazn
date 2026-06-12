@@ -177,7 +177,14 @@ final class TerminalPanel: Panel, ObservableObject {
         surface.setFocus(true)
         hostedView.moveFocus()
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self,
+                  self.hostedView.debugPortalActive,
+                  self.hostedView.debugPortalVisibleInUI,
+                  AppDelegate.shared?.allowsTerminalKeyboardFocus(
+                    workspaceId: self.workspaceId,
+                    panelId: self.id,
+                    in: self.hostedView.window
+                  ) != false else { return }
             self.surface.setFocus(true)
             self.hostedView.moveFocus()
         }

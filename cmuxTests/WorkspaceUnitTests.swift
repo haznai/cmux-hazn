@@ -3279,6 +3279,61 @@ final class WorkspaceAttachedOverlayRoutingTests: XCTestCase {
         XCTAssertEqual(workspace.backgroundedAttachedOverlaySurfaces[secondOverlay.id]?.isVisible, false)
     }
 
+    func testClosingBackgroundedOverlayDoesNotStealPaneFocus() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId),
+              let secondPanel = workspace.newTerminalSplit(from: sourcePanelId, orientation: .horizontal, focus: false),
+              let secondPaneId = workspace.paneId(forPanelId: secondPanel.id),
+              let overlayPanel = workspace.newOverlayTerminalSurface(
+                overPane: sourcePaneId,
+                focus: true
+              ) else {
+            XCTFail("Expected split workspace with attached overlay")
+            return
+        }
+
+        XCTAssertTrue(workspace.backgroundAttachedOverlaySurface(overlayPanel.id))
+        workspace.focusPane(secondPaneId)
+        XCTAssertEqual(workspace.bonsplitController.focusedPaneId?.id, secondPaneId.id)
+        XCTAssertEqual(workspace.focusedPanelId, secondPanel.id)
+
+        XCTAssertTrue(workspace.closeAttachedOverlaySurface(overlayPanel.id))
+
+        XCTAssertEqual(
+            workspace.bonsplitController.focusedPaneId?.id,
+            secondPaneId.id,
+            "Closing a hidden/backgrounded overlay must not restore focus to its old anchor pane"
+        )
+        XCTAssertEqual(workspace.focusedPanelId, secondPanel.id)
+    }
+
+    func testBackgroundedTerminalOverlayDoesNotDeferredRefocus() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId),
+              let overlayPanel = workspace.newOverlayTerminalSurface(
+                overPane: sourcePaneId,
+                focus: true
+              ) else {
+            XCTFail("Expected attached terminal overlay")
+            return
+        }
+
+        XCTAssertEqual(workspace.focusedPanelId, overlayPanel.id)
+        XCTAssertTrue(overlayPanel.surface.debugDesiredFocusState())
+
+        XCTAssertTrue(workspace.backgroundAttachedOverlaySurface(overlayPanel.id))
+        XCTAssertFalse(overlayPanel.surface.debugDesiredFocusState())
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertFalse(
+            overlayPanel.surface.debugDesiredFocusState(),
+            "Deferred overlay focus work must not refocus a backgrounded overlay"
+        )
+    }
+
     func testExplicitCloseLastSplitSurfaceWithOverlayClosesWorkspace() {
         let manager = TabManager()
         let workspace = manager.addWorkspace(select: true)
