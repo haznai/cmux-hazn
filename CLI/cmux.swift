@@ -2707,26 +2707,23 @@ struct CMUXCLI {
             let trailingCommandArgs = terminatorIndex.map { Array(commandArgs[commandArgs.index(after: $0)...]) } ?? []
             let floating = optionArgs.contains("--floating") || optionArgs.contains("--always-on-top")
             let noFocus = optionArgs.contains("--no-focus")
-            let argsWithoutBoolFlags = optionArgs.filter {
+            let optionArgsWithoutBoolFlags = optionArgs.filter {
                 $0 != "--floating" && $0 != "--always-on-top" && $0 != "--no-focus"
-            } + (terminatorIndex == nil ? [] : ["--"] + trailingCommandArgs)
-            let (commandOpt, rem0) = parseOption(argsWithoutBoolFlags, name: "--command")
+            }
+            let (commandOpt, rem0) = parseOption(optionArgsWithoutBoolFlags, name: "--command")
             let (cwdOpt, rem1) = parseOption(rem0, name: "--cwd")
             let (nameOpt, rem2) = parseOption(rem1, name: "--name")
             let (frameOpt, rem3) = parseOption(rem2, name: "--frame")
             let (appKitFrameOpt, rem4) = parseOption(rem3, name: "--appkit-frame")
             let (positionOpt, rem5) = parseOption(rem4, name: "--position")
             let (sizeOpt, rem6) = parseOption(rem5, name: "--size")
-            let (focusOpt, remaining) = parseOption(rem6, name: "--focus")
-            let argsBeforeTerminator = Array(remaining.prefix { $0 != "--" })
-            if let unknown = argsBeforeTerminator.first(where: { $0.hasPrefix("--") }) {
+            let (focusOpt, remainingOptionArgs) = parseOption(rem6, name: "--focus")
+            if let unknown = remainingOptionArgs.first(where: { $0.hasPrefix("--") }) {
                 throw CLIError(message: "new-window: unknown flag '\(unknown)'. Known flags: --name <title>, --command <text>, --cwd <path>, --frame <x,y,w,h>, --position <x,y>, --size <w,h>, --floating, --focus <true|false>, --no-focus")
             }
             let trailingCommand: String? = {
-                guard let terminator = remaining.firstIndex(of: "--") else { return nil }
-                let commandParts = remaining.dropFirst(terminator + 1)
-                guard !commandParts.isEmpty else { return nil }
-                return commandParts.map(shellSingleQuote).joined(separator: " ")
+                guard !trailingCommandArgs.isEmpty else { return nil }
+                return trailingCommandArgs.map(shellSingleQuote).joined(separator: " ")
             }()
             if noFocus, focusOpt != nil {
                 throw CLIError(message: "new-window: use either --no-focus or --focus, not both")

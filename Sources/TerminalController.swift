@@ -3140,8 +3140,9 @@ class TerminalController {
             let windowId = v2ResolveWindowId(tabManager: tabManager)
             if let wsId = tabManager.selectedTabId,
                let ws = tabManager.tabs.first(where: { $0.id == wsId }) {
-                let paneUUID = ws.bonsplitController.focusedPaneId?.id
                 let surfaceUUID = ws.focusedPanelId
+                let paneUUID = surfaceUUID.flatMap { ws.paneId(forPanelId: $0)?.id }
+                    ?? ws.bonsplitController.focusedPaneId?.id
                 let placement = surfaceUUID.map { ws.isAttachedOverlaySurface($0) ? "overlay" : "split" }
                 focused = [
                     "window_id": v2OrNull(windowId?.uuidString),

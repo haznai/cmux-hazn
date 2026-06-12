@@ -593,6 +593,66 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         XCTAssertEqual(portsKickResult["surface_id"] as? String, focusedPanelId.uuidString)
     }
 
+    func testSystemIdentifyReportsFocusedOverlayAnchorPane() async throws {
+        let socketPath = makeSocketPath("identify-overlay")
+        let manager = TabManager()
+        let workspace = manager.addWorkspace(select: true)
+
+        defer {
+            if manager.tabs.contains(where: { $0.id == workspace.id }) {
+                manager.closeWorkspace(workspace)
+            }
+        }
+
+        guard let basePanelId = workspace.focusedPanelId,
+              let basePaneId = workspace.paneId(forPanelId: basePanelId),
+              let secondPanel = workspace.newTerminalSplit(from: basePanelId, orientation: .horizontal),
+              let overlayAnchorPaneId = workspace.paneId(forPanelId: secondPanel.id) else {
+            XCTFail("Expected two split panes for overlay identify test")
+            return
+        }
+
+        workspace.focusPanel(basePanelId)
+        XCTAssertEqual(workspace.bonsplitController.focusedPaneId?.id, basePaneId.id)
+
+        guard let overlayPanel = workspace.newOverlayTerminalSurface(
+            overPane: overlayAnchorPaneId,
+            focus: true,
+            piHaznShellControls: true
+        ) else {
+            XCTFail("Expected focused attached overlay surface")
+            return
+        }
+
+        XCTAssertEqual(workspace.focusedPanelId, overlayPanel.id)
+        XCTAssertEqual(workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.anchorPaneId.id, overlayAnchorPaneId.id)
+        XCTAssertEqual(
+            workspace.bonsplitController.focusedPaneId?.id,
+            basePaneId.id,
+            "The regression requires the overlay anchor pane to differ from Bonsplit's focused pane"
+        )
+
+        TerminalController.shared.start(
+            tabManager: manager,
+            socketPath: socketPath,
+            accessMode: .allowAll
+        )
+        try waitForSocket(at: socketPath)
+
+        let response = try await sendV2RequestAsync(
+            method: "system.identify",
+            params: ["workspace_id": workspace.id.uuidString],
+            to: socketPath
+        )
+
+        XCTAssertEqual(response["ok"] as? Bool, true, "Unexpected JSON-RPC response: \(response)")
+        let result = try XCTUnwrap(response["result"] as? [String: Any], "Unexpected JSON-RPC response: \(response)")
+        let focused = try XCTUnwrap(result["focused"] as? [String: Any], "Expected focused payload")
+        XCTAssertEqual(focused["surface_id"] as? String, overlayPanel.id.uuidString)
+        XCTAssertEqual(focused["pane_id"] as? String, overlayAnchorPaneId.id.uuidString)
+        XCTAssertEqual(focused["placement"] as? String, "overlay")
+    }
+
     func testSurfaceRelayRPCsRejectExplicitUnknownSurfaceID() async throws {
         let socketPath = makeSocketPath("relay-invalid")
         let manager = TabManager()

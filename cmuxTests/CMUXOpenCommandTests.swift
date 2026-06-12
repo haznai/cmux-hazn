@@ -92,7 +92,10 @@ final class CMUXOpenCommandTests: XCTestCase {
         let result = runCLI(
             cliPath: cliPath,
             socketPath: socketPath,
-            arguments: ["new-window", "--floating", "--", "zsh", "-lc", "date; pwd", "it's fine", "--no-focus"]
+            arguments: [
+                "new-window", "--floating", "--", "zsh", "-lc", "date; pwd", "it's fine",
+                "--no-focus", "--command", "hi", "--cwd", "/tmp", "--focus", "false"
+            ]
         )
 
         wait(for: [serverHandled], timeout: 5)
@@ -102,7 +105,10 @@ final class CMUXOpenCommandTests: XCTestCase {
         let params = try XCTUnwrap(payload["params"] as? [String: Any])
         XCTAssertEqual(params["floating"] as? Bool, true)
         XCTAssertEqual(params["focus"] as? Bool, true)
-        XCTAssertEqual(params["initial_input"] as? String, "'zsh' '-lc' 'date; pwd' 'it'\"'\"'s fine' '--no-focus'\r")
+        XCTAssertEqual(
+            params["initial_input"] as? String,
+            "'zsh' '-lc' 'date; pwd' 'it'\"'\"'s fine' '--no-focus' '--command' 'hi' '--cwd' '/tmp' '--focus' 'false'\r"
+        )
     }
 
     func testOpenCommandProcessesMixedTargetsInInputOrder() throws {
