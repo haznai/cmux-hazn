@@ -7441,9 +7441,18 @@ class TerminalController {
 
             let panes: [[String: Any]] = ws.bonsplitController.allPaneIds.enumerated().map { index, paneId in
                 let tabs = ws.bonsplitController.tabs(inPane: paneId)
-                let surfaceUUIDs: [UUID] = tabs.compactMap { ws.panelIdFromSurfaceId($0.id) }
+                let splitSurfaceUUIDs: [UUID] = tabs.compactMap { ws.panelIdFromSurfaceId($0.id) }
+                let overlayMetadata = ws.attachedOverlayMetadata(anchoredTo: paneId)
+                let overlaySurfaceUUIDs = overlayMetadata.compactMap { overlay -> UUID? in
+                    ws.panels[overlay.id] == nil ? nil : overlay.id
+                }
+                let surfaceUUIDs = splitSurfaceUUIDs + overlaySurfaceUUIDs
                 let selectedTab = ws.bonsplitController.selectedTab(inPane: paneId)
-                let selectedSurfaceUUID = selectedTab.flatMap { ws.panelIdFromSurfaceId($0.id) }
+                let selectedSplitSurfaceUUID = selectedTab.flatMap { ws.panelIdFromSurfaceId($0.id) }
+                let selectedOverlaySurfaceUUID = overlayMetadata.first { overlay in
+                    overlay.isVisible && overlay.isFocused && ws.panels[overlay.id] != nil
+                }?.id
+                let selectedSurfaceUUID = selectedOverlaySurfaceUUID ?? selectedSplitSurfaceUUID
 
                 var dict: [String: Any] = [
                     "id": paneId.id.uuidString,
@@ -7554,7 +7563,7 @@ class TerminalController {
             let selectedTab = ws.bonsplitController.selectedTab(inPane: paneId)
             let tabs = ws.bonsplitController.tabs(inPane: paneId)
 
-            let surfaces: [[String: Any]] = tabs.enumerated().map { index, tab in
+            var surfaces: [[String: Any]] = tabs.enumerated().map { index, tab in
                 let panelId = ws.panelIdFromSurfaceId(tab.id)
                 let panel = panelId.flatMap { ws.panels[$0] }
                 return [
@@ -7563,8 +7572,27 @@ class TerminalController {
                     "index": index,
                     "title": tab.title,
                     "type": v2OrNull(panel?.panelType.rawValue),
-                    "selected": tab.id == selectedTab?.id
+                    "selected": tab.id == selectedTab?.id,
+                    "placement": "split",
+                    "visible": true,
+                    "focused": panelId == ws.focusedPanelId
                 ]
+            }
+
+            for overlay in ws.attachedOverlayMetadata(anchoredTo: paneId) {
+                guard let panel = ws.panels[overlay.id] else { continue }
+                surfaces.append([
+                    "id": overlay.id.uuidString,
+                    "ref": v2Ref(kind: .surface, uuid: overlay.id),
+                    "index": surfaces.count,
+                    "title": ws.panelTitle(panelId: overlay.id) ?? panel.displayTitle,
+                    "type": panel.panelType.rawValue,
+                    "selected": overlay.isVisible && overlay.isFocused,
+                    "placement": "overlay",
+                    "visible": overlay.isVisible,
+                    "focused": overlay.isVisible && overlay.isFocused,
+                    "pi_hazn_shell_controls": overlay.piHaznShellControls
+                ])
             }
 
             let windowId = v2ResolveWindowId(tabManager: tabManager)
@@ -15993,8 +16021,12 @@ class TerminalController {
 
             let lines = paneIds.enumerated().map { index, paneId in
                 let selected = paneId == focusedPaneId ? "*" : " "
-                let tabCount = tab.bonsplitController.tabs(inPane: paneId).count
-                return "\(selected) \(index): \(paneId) [\(tabCount) tabs]"
+                let splitCount = tab.bonsplitController.tabs(inPane: paneId).count
+                let overlayCount = tab.attachedOverlayMetadata(anchoredTo: paneId).filter { overlay in
+                    tab.panels[overlay.id] != nil
+                }.count
+                let surfaceCount = splitCount + overlayCount
+                return "\(selected) \(index): \(paneId) [\(surfaceCount) surfaces]"
             }
             result = lines.isEmpty ? "No panes" : lines.joined(separator: "\n")
         }
@@ -16043,13 +16075,19 @@ class TerminalController {
             let tabs = tab.bonsplitController.tabs(inPane: paneId)
             let selectedTab = tab.bonsplitController.selectedTab(inPane: paneId)
 
-            let lines = tabs.enumerated().map { index, bonsplitTab in
+            var lines = tabs.enumerated().map { index, bonsplitTab in
                 let selected = bonsplitTab.id == selectedTab?.id ? "*" : " "
                 let panelId = tab.panelIdFromSurfaceId(bonsplitTab.id)
                 let panelIdStr = panelId?.uuidString ?? "unknown"
                 return "\(selected) \(index): \(bonsplitTab.title) [panel:\(panelIdStr)]"
             }
-            result = lines.isEmpty ? "No tabs in pane" : lines.joined(separator: "\n")
+            for overlay in tab.attachedOverlayMetadata(anchoredTo: paneId) where tab.panels[overlay.id] != nil {
+                let selected = overlay.isVisible && overlay.isFocused ? "*" : " "
+                let visibility = overlay.isVisible ? "visible" : "hidden"
+                let title = tab.panelTitle(panelId: overlay.id) ?? tab.panels[overlay.id]?.displayTitle ?? "Overlay"
+                lines.append("\(selected) \(lines.count): \(title) (overlay, \(visibility)) [panel:\(overlay.id.uuidString)]")
+            }
+            result = lines.isEmpty ? "No surfaces" : lines.joined(separator: "\n")
         }
         return result
     }

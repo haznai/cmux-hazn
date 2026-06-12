@@ -137,6 +137,12 @@ enum KeyboardShortcutSettings {
         case showBrowserJavaScriptConsole
         case toggleReactGrab
 
+        // Pi-controlled attached overlays
+        case piHaznOverlayTransfer
+        case piHaznOverlayBackground
+        case piHaznOverlayMenu
+        case piHaznOverlayCloseMenu
+
         var id: String { rawValue }
 
         var label: String {
@@ -210,6 +216,10 @@ enum KeyboardShortcutSettings {
             case .toggleBrowserDeveloperTools: return String(localized: "shortcut.toggleBrowserDevTools.label", defaultValue: "Toggle Browser Developer Tools")
             case .showBrowserJavaScriptConsole: return String(localized: "shortcut.showBrowserJSConsole.label", defaultValue: "Show Browser JavaScript Console")
             case .toggleReactGrab: return String(localized: "shortcut.toggleReactGrab.label", defaultValue: "Toggle React Grab")
+            case .piHaznOverlayTransfer: return String(localized: "shortcut.piHaznOverlayTransfer.label", defaultValue: "Pi Overlay: Transfer to Agent")
+            case .piHaznOverlayBackground: return String(localized: "shortcut.piHaznOverlayBackground.label", defaultValue: "Pi Overlay: Background Session")
+            case .piHaznOverlayMenu: return String(localized: "shortcut.piHaznOverlayMenu.label", defaultValue: "Pi Overlay: Session Menu")
+            case .piHaznOverlayCloseMenu: return String(localized: "shortcut.piHaznOverlayCloseMenu.label", defaultValue: "Pi Overlay: Close/Menu")
             }
         }
 
@@ -371,6 +381,14 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: "c", command: true, shift: false, option: true, control: false)
             case .toggleReactGrab:
                 return StoredShortcut(key: "g", command: true, shift: true, option: false, control: false)
+            case .piHaznOverlayTransfer:
+                return StoredShortcut(key: "t", command: false, shift: false, option: false, control: true)
+            case .piHaznOverlayBackground:
+                return StoredShortcut(key: "b", command: false, shift: false, option: false, control: true)
+            case .piHaznOverlayMenu:
+                return StoredShortcut(key: "q", command: false, shift: false, option: false, control: true)
+            case .piHaznOverlayCloseMenu:
+                return StoredShortcut(key: "w", command: true, shift: false, option: false, control: false)
             }
         }
 

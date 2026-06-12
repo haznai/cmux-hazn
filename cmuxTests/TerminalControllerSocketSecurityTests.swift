@@ -893,6 +893,69 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         XCTAssertEqual(currentResult["placement"] as? String, "split")
     }
 
+    func testPaneListAndSurfacesIncludeAnchoredOverlay() async throws {
+        let socketPath = makeSocketPath("pane-overlay-list")
+        let manager = TabManager()
+        let workspace = manager.addWorkspace(select: true)
+
+        defer {
+            if manager.tabs.contains(where: { $0.id == workspace.id }) {
+                manager.closeWorkspace(workspace)
+            }
+        }
+
+        guard let basePanelId = workspace.focusedPanelId,
+              let basePaneId = workspace.paneId(forPanelId: basePanelId),
+              let overlayPanel = workspace.newOverlayTerminalSurface(
+                overPane: basePaneId,
+                focus: true,
+                piHaznShellControls: true
+              ) else {
+            XCTFail("Expected focused attached overlay")
+            return
+        }
+
+        TerminalController.shared.start(
+            tabManager: manager,
+            socketPath: socketPath,
+            accessMode: .allowAll
+        )
+        try waitForSocket(at: socketPath)
+
+        let listResponse = try await sendV2RequestAsync(
+            method: "pane.list",
+            params: ["workspace_id": workspace.id.uuidString],
+            to: socketPath
+        )
+        XCTAssertEqual(listResponse["ok"] as? Bool, true, "Unexpected JSON-RPC response: \(listResponse)")
+        let listResult = try XCTUnwrap(listResponse["result"] as? [String: Any])
+        let panes = try XCTUnwrap(listResult["panes"] as? [[String: Any]])
+        let panePayload = try XCTUnwrap(panes.first { ($0["id"] as? String) == basePaneId.id.uuidString })
+        let surfaceIds = try XCTUnwrap(panePayload["surface_ids"] as? [String])
+        XCTAssertTrue(surfaceIds.contains(basePanelId.uuidString))
+        XCTAssertTrue(surfaceIds.contains(overlayPanel.id.uuidString), "pane.list must expose visible overlays anchored to the pane")
+        XCTAssertEqual(panePayload["surface_count"] as? Int, 2)
+        XCTAssertEqual(panePayload["selected_surface_id"] as? String, overlayPanel.id.uuidString)
+
+        let surfacesResponse = try await sendV2RequestAsync(
+            method: "pane.surfaces",
+            params: [
+                "workspace_id": workspace.id.uuidString,
+                "pane_id": basePaneId.id.uuidString
+            ],
+            to: socketPath
+        )
+        XCTAssertEqual(surfacesResponse["ok"] as? Bool, true, "Unexpected JSON-RPC response: \(surfacesResponse)")
+        let surfacesResult = try XCTUnwrap(surfacesResponse["result"] as? [String: Any])
+        let surfaces = try XCTUnwrap(surfacesResult["surfaces"] as? [[String: Any]])
+        let overlayPayload = try XCTUnwrap(surfaces.first { ($0["id"] as? String) == overlayPanel.id.uuidString })
+        XCTAssertEqual(overlayPayload["placement"] as? String, "overlay")
+        XCTAssertEqual(overlayPayload["selected"] as? Bool, true)
+        XCTAssertEqual(overlayPayload["visible"] as? Bool, true)
+        XCTAssertEqual(overlayPayload["focused"] as? Bool, true)
+        XCTAssertEqual(overlayPayload["pi_hazn_shell_controls"] as? Bool, true)
+    }
+
     func testMoveToNewWorkspaceReanchorsOverlayBeforeDetachingAnchorSurface() async throws {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")

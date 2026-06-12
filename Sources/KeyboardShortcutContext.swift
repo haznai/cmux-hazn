@@ -17,9 +17,10 @@ extension KeyboardShortcutSettings.Action {
         case nonBrowserPanel
         case browserPanel
         case rightSidebarFocus
+        case piHaznOverlay
 
         var isAlwaysAvailable: Bool {
-            self == .application
+            self == .application || self == .piHaznOverlay
         }
 
         func isAvailable(focusedBrowserPanel: Bool, rightSidebarFocused: Bool) -> Bool {
@@ -32,6 +33,8 @@ extension KeyboardShortcutSettings.Action {
                 return focusedBrowserPanel
             case .rightSidebarFocus:
                 return rightSidebarFocused
+            case .piHaznOverlay:
+                return true
             }
         }
 
@@ -40,6 +43,9 @@ extension KeyboardShortcutSettings.Action {
         }
 
         func overlaps(_ other: ShortcutContext) -> Bool {
+            if self == .piHaznOverlay || other == .piHaznOverlay {
+                return self == other
+            }
             if self == .application || other == .application {
                 return true
             }
@@ -56,6 +62,8 @@ extension KeyboardShortcutSettings.Action {
         case .browserBack, .browserForward, .browserReload, .toggleBrowserDeveloperTools, .showBrowserJavaScriptConsole,
              .browserZoomIn, .browserZoomOut, .browserZoomReset:
             return .browserPanel
+        case .piHaznOverlayTransfer, .piHaznOverlayBackground, .piHaznOverlayMenu, .piHaznOverlayCloseMenu:
+            return .piHaznOverlay
         default:
             return .application
         }

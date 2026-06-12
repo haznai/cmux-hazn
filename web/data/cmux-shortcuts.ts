@@ -104,6 +104,30 @@ export const shortcutCategories: ShortcutCategory[] = [
       { id: "reopenClosedBrowserPanel", combos: [["⌘", "⇧", "T"]], description: { en: "Reopen closed browser panel", ja: "閉じたブラウザパネルを再度開く" } },
       { id: "toggleTerminalCopyMode", combos: [["⌘", "⇧", "M"]], description: { en: "Toggle terminal copy mode", ja: "ターミナルコピーモードを切り替え" } },
       {
+        id: "piHaznOverlayTransfer",
+        combos: [["⌃", "T"]],
+        description: { en: "Pi overlay: transfer output to agent", ja: "Piオーバーレイ: 出力をエージェントへ転送" },
+        note: { en: "focused Pi-controlled overlay", ja: "フォーカス中のPi制御オーバーレイ" },
+      },
+      {
+        id: "piHaznOverlayBackground",
+        combos: [["⌃", "B"]],
+        description: { en: "Pi overlay: background session", ja: "Piオーバーレイ: セッションをバックグラウンドへ" },
+        note: { en: "focused Pi-controlled overlay", ja: "フォーカス中のPi制御オーバーレイ" },
+      },
+      {
+        id: "piHaznOverlayMenu",
+        combos: [["⌃", "Q"]],
+        description: { en: "Pi overlay: session menu", ja: "Piオーバーレイ: セッションメニュー" },
+        note: { en: "focused Pi-controlled overlay", ja: "フォーカス中のPi制御オーバーレイ" },
+      },
+      {
+        id: "piHaznOverlayCloseMenu",
+        combos: [["⌘", "W"]],
+        description: { en: "Pi overlay: close/menu", ja: "Piオーバーレイ: 閉じる/メニュー" },
+        note: { en: "focused Pi-controlled overlay; coexists with Close Tab outside overlays", ja: "フォーカス中のPi制御オーバーレイ。オーバーレイ外ではタブを閉じると共存" },
+      },
+      {
         id: "saveFilePreview",
         combos: [["⌘", "S"]],
         description: { en: "Save file preview", ja: "ファイルプレビューを保存" },

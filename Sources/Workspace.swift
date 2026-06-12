@@ -10852,6 +10852,22 @@ final class Workspace: Identifiable, ObservableObject {
         return backgroundedAttachedOverlaySurfaces[panelId]
     }
 
+    func attachedOverlayMetadata(anchoredTo paneId: PaneID) -> [WorkspaceAttachedOverlaySurface] {
+        var overlaysById: [UUID: WorkspaceAttachedOverlaySurface] = [:]
+        if let overlay = attachedOverlaySurface,
+           overlay.anchorPaneId == paneId {
+            overlaysById[overlay.id] = overlay
+        }
+        for overlay in backgroundedAttachedOverlaySurfaces.values where overlay.anchorPaneId == paneId {
+            overlaysById[overlay.id] = overlay
+        }
+        return overlaysById.values.sorted { lhs, rhs in
+            if lhs.isVisible != rhs.isVisible { return lhs.isVisible && !rhs.isVisible }
+            if lhs.isFocused != rhs.isFocused { return lhs.isFocused && !rhs.isFocused }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
     func isAttachedOverlaySurface(_ panelId: UUID) -> Bool {
         attachedOverlayMetadata(forPanelId: panelId) != nil
     }
@@ -11014,13 +11030,21 @@ final class Workspace: Identifiable, ObservableObject {
         return true
     }
 
-    func reanchorAttachedOverlaysIfNeeded(beforeClosingSplitPanel panelId: UUID) {
+    func reanchorAttachedOverlaysIfNeeded(
+        beforeClosingSplitPanel panelId: UUID,
+        preferredReplacementPane: PaneID? = nil
+    ) {
         guard let closingTabId = surfaceIdFromPanelId(panelId),
               let closingPane = paneId(forPanelId: panelId) else { return }
         let tabsInClosingPane = bonsplitController.tabs(inPane: closingPane)
         guard tabsInClosingPane.count == 1,
-              tabsInClosingPane.first?.id == closingTabId,
-              let replacementPane = replacementOverlayAnchorPane(excluding: closingPane) else { return }
+              tabsInClosingPane.first?.id == closingTabId else { return }
+        let replacementPane = preferredReplacementPane.flatMap { preferred -> PaneID? in
+            guard preferred.id != closingPane.id,
+                  bonsplitController.allPaneIds.contains(preferred) else { return nil }
+            return preferred
+        } ?? replacementOverlayAnchorPane(excluding: closingPane)
+        guard let replacementPane else { return }
 
         if var overlay = attachedOverlaySurface,
            overlay.anchorPaneId.id == closingPane.id {
@@ -11390,6 +11414,12 @@ final class Workspace: Identifiable, ObservableObject {
     func moveSurface(panelId: UUID, toPane paneId: PaneID, atIndex index: Int? = nil, focus: Bool = true) -> Bool {
         guard let tabId = surfaceIdFromPanelId(panelId) else { return false }
         guard bonsplitController.allPaneIds.contains(paneId) else { return false }
+        if let sourcePaneId = self.paneId(forPanelId: panelId), sourcePaneId != paneId {
+            reanchorAttachedOverlaysIfNeeded(
+                beforeClosingSplitPanel: panelId,
+                preferredReplacementPane: paneId
+            )
+        }
         guard bonsplitController.moveTab(tabId, toPane: paneId, atIndex: index) else { return false }
 
         if focus {
@@ -11431,6 +11461,7 @@ final class Workspace: Identifiable, ObservableObject {
         guard let tabId = surfaceIdFromPanelId(panelId) else { return nil }
         guard let sourcePanel = panels[panelId] else { return nil }
         let sourcePaneId = paneId(forPanelId: panelId)
+        reanchorAttachedOverlaysIfNeeded(beforeClosingSplitPanel: panelId)
         let shouldSkipControlMasterCleanupAfterDetach =
             activeRemoteTerminalSurfaceIds.contains(panelId)
             && activeRemoteTerminalSurfaceIds.count == 1

@@ -3366,6 +3366,59 @@ final class WorkspaceAttachedOverlayRoutingTests: XCTestCase {
         )
     }
 
+    func testOverlayReanchorsBeforeMovingAnchorPanesLastSplitSurface() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId),
+              let targetPanel = workspace.newTerminalSplit(from: sourcePanelId, orientation: .horizontal, focus: false),
+              let targetPaneId = workspace.paneId(forPanelId: targetPanel.id),
+              let overlayPanel = workspace.newOverlayTerminalSurface(
+                overPane: sourcePaneId,
+                focus: true
+              ) else {
+            XCTFail("Expected split workspace with attached overlay")
+            return
+        }
+
+        XCTAssertEqual(workspace.attachedOverlaySurface?.anchorPaneId.id, sourcePaneId.id)
+
+        XCTAssertTrue(workspace.moveSurface(panelId: sourcePanelId, toPane: targetPaneId, focus: false))
+
+        XCTAssertEqual(
+            workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.anchorPaneId.id,
+            targetPaneId.id,
+            "Moving the last split surface out of an overlay anchor pane must reanchor the overlay before the source pane disappears"
+        )
+        XCTAssertTrue(workspace.bonsplitController.allPaneIds.contains { $0.id == targetPaneId.id })
+    }
+
+    func testOverlayReanchorsBeforeDetachingAnchorPanesLastSplitSurface() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId),
+              let survivingPanel = workspace.newTerminalSplit(from: sourcePanelId, orientation: .horizontal, focus: false),
+              let survivingPaneId = workspace.paneId(forPanelId: survivingPanel.id),
+              let overlayPanel = workspace.newOverlayTerminalSurface(
+                overPane: sourcePaneId,
+                focus: true
+              ) else {
+            XCTFail("Expected split workspace with attached overlay")
+            return
+        }
+
+        XCTAssertEqual(workspace.attachedOverlaySurface?.anchorPaneId.id, sourcePaneId.id)
+
+        let transfer = workspace.detachSurface(panelId: sourcePanelId)
+
+        XCTAssertNotNil(transfer)
+        XCTAssertEqual(
+            workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.anchorPaneId.id,
+            survivingPaneId.id,
+            "Detaching the last split surface from an overlay anchor pane must not leave the overlay anchored to the removed pane"
+        )
+        XCTAssertTrue(workspace.bonsplitController.allPaneIds.contains { $0.id == survivingPaneId.id })
+    }
+
     func testOverlayReanchorsBeforeClosingAnchorPanesLastSplitSurface() {
         let workspace = Workspace()
         guard let sourcePanelId = workspace.focusedPanelId,

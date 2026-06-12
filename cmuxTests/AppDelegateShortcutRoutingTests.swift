@@ -5360,6 +5360,94 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         XCTAssertTrue(window.isVisible, "Cmd+W must not close the cmux window while a Pi overlay owns it")
     }
 
+    func testPiHaznAttachedOverlayMenuShortcutFollowsRemap() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let window = window(withId: windowId),
+              let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let paneId = workspace.bonsplitController.focusedPaneId,
+              let overlayPanel = workspace.newOverlayTerminalSurface(
+                overPane: paneId,
+                focus: true,
+                piHaznShellControls: true
+              ) else {
+            XCTFail("Expected focused Pi hazn overlay surface")
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        overlayPanel.hostedView.setVisibleInUI(true)
+        overlayPanel.hostedView.setActive(true)
+        XCTAssertTrue(workspace.focusAttachedOverlaySurface(overlayPanel.id))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        let remappedMenuShortcut = StoredShortcut(
+            key: "m",
+            command: false,
+            shift: false,
+            option: false,
+            control: true,
+            keyCode: 46
+        )
+
+        withTemporaryShortcut(action: .piHaznOverlayMenu, shortcut: remappedMenuShortcut) {
+            var requestedShortcut: String?
+#if DEBUG
+            appDelegate.debugPiHaznOverlayMenuChoiceHandler = { shortcut, _ in
+                requestedShortcut = shortcut
+                return nil
+            }
+#endif
+
+            guard let staleDefaultEvent = makeKeyDownEvent(
+                key: "q",
+                modifiers: [.control],
+                keyCode: 12,
+                windowNumber: window.windowNumber
+            ) else {
+                XCTFail("Failed to construct Ctrl+Q event")
+                return
+            }
+
+#if DEBUG
+            XCTAssertFalse(
+                appDelegate.debugHandleCustomShortcut(event: staleDefaultEvent),
+                "After Pi overlay menu is remapped, the old Ctrl+Q shortcut must not keep opening the lifecycle menu"
+            )
+#else
+            XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+            XCTAssertNil(requestedShortcut)
+
+            guard let remappedEvent = makeKeyDownEvent(
+                key: "m",
+                modifiers: [.control],
+                keyCode: 46,
+                windowNumber: window.windowNumber
+            ) else {
+                XCTFail("Failed to construct remapped Ctrl+M event")
+                return
+            }
+
+#if DEBUG
+            XCTAssertTrue(appDelegate.debugHandleCustomShortcut(event: remappedEvent))
+#else
+            XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+            XCTAssertEqual(requestedShortcut, "ctrl+m")
+            XCTAssertEqual(workspace.attachedOverlaySurface?.id, overlayPanel.id)
+            XCTAssertNotNil(workspace.panels[overlayPanel.id])
+        }
+    }
+
     func testPlainWPassesThroughFocusedPiHaznAttachedOverlay() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")

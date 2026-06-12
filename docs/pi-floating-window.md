@@ -126,7 +126,11 @@ Use `cmux-haznfloat --rebuild` when the app bundle needs to be rebuilt, and
 
 cmux also publishes Pi-specific events when the user triggers the overlay
 shortcuts on an overlay created with `pi_hazn_shell_controls: true`. Ordinary
-cmux terminals and ordinary cmux overlays keep their normal Ctrl key behavior:
+cmux terminals and ordinary cmux overlays keep their normal Ctrl key behavior.
+The defaults below are registered in `Settings → Keyboard Shortcuts` and can be
+overridden in `cmux.json` under `shortcuts.bindings` with action ids
+`piHaznOverlayTransfer`, `piHaznOverlayBackground`, `piHaznOverlayMenu`, and
+`piHaznOverlayCloseMenu`:
 
 | Shortcut | Event | Effect |
 | --- | --- | --- |

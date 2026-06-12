@@ -780,7 +780,11 @@
               "useSelectionForFind",
               "toggleBrowserDeveloperTools",
               "showBrowserJavaScriptConsole",
-              "toggleReactGrab"
+              "toggleReactGrab",
+              "piHaznOverlayTransfer",
+              "piHaznOverlayBackground",
+              "piHaznOverlayMenu",
+              "piHaznOverlayCloseMenu"
             ]
           },
           "additionalProperties": {

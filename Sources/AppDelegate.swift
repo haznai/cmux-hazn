@@ -11088,8 +11088,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         if handlePiHaznOverlayShortcut(
             event: event,
-            chars: chars,
-            normalizedFlags: normalizedFlags,
             commandPaletteEffectiveInTargetWindow: commandPaletteEffectiveInTargetWindow
         ) {
             return true
@@ -12807,24 +12805,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func piHaznOverlayShortcutAction(event: NSEvent, chars: String, normalizedFlags: NSEvent.ModifierFlags) -> PiHaznOverlayShortcutMatch? {
-        let lowered = chars.lowercased()
-        if normalizedFlags == .control {
-            if lowered == "t" || event.characters == "\u{14}" || event.keyCode == 17 {
-                return PiHaznOverlayShortcutMatch(intent: .action(.transfer), shortcut: "ctrl+t")
-            }
-            if lowered == "b" || event.characters == "\u{02}" || event.keyCode == 11 {
-                return PiHaznOverlayShortcutMatch(intent: .action(.background), shortcut: "ctrl+b")
-            }
-            if lowered == "q" || event.characters == "\u{11}" || event.keyCode == 12 {
-                return PiHaznOverlayShortcutMatch(intent: .menu, shortcut: "ctrl+q")
-            }
-            return nil
-        }
-        if normalizedFlags == .command {
-            if lowered == "w" || event.keyCode == 13 {
-                return PiHaznOverlayShortcutMatch(intent: .menu, shortcut: "cmd+w")
-            }
+    private func piHaznOverlayShortcutAction(event: NSEvent) -> PiHaznOverlayShortcutMatch? {
+        let candidates: [(KeyboardShortcutSettings.Action, PiHaznOverlayShortcutIntent)] = [
+            (.piHaznOverlayTransfer, .action(.transfer)),
+            (.piHaznOverlayBackground, .action(.background)),
+            (.piHaznOverlayMenu, .menu),
+            (.piHaznOverlayCloseMenu, .menu),
+        ]
+        for (action, intent) in candidates {
+            let shortcut = KeyboardShortcutSettings.shortcut(for: action)
+            guard matchConfiguredShortcut(event: event, shortcut: shortcut) else { continue }
+            return PiHaznOverlayShortcutMatch(intent: intent, shortcut: shortcut.configIdentifier)
         }
         return nil
     }
@@ -13001,16 +12992,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private func handlePiHaznOverlayShortcut(
         event: NSEvent,
-        chars: String,
-        normalizedFlags: NSEvent.ModifierFlags,
         commandPaletteEffectiveInTargetWindow: Bool
     ) -> Bool {
         guard !commandPaletteEffectiveInTargetWindow,
-              let shortcutMatch = piHaznOverlayShortcutAction(
-                event: event,
-                chars: chars,
-                normalizedFlags: normalizedFlags
-              ),
+              let shortcutMatch = piHaznOverlayShortcutAction(event: event),
               let context = preferredMainWindowContextForShortcuts(event: event),
               let workspaceId = context.tabManager.selectedTabId,
               let workspace = context.tabManager.tabs.first(where: { $0.id == workspaceId }),

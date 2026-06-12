@@ -173,6 +173,17 @@ For more info on how to configure cmux, [head over to our docs](https://cmux.com
 | ⌃ 9 | Jump to last surface |
 | ⌘ W | Close surface |
 
+### Pi-controlled overlays
+
+These apply only while a Pi-launched attached overlay is focused. They are customizable in `Settings → Keyboard Shortcuts` and `cmux.json`.
+
+| Shortcut | Action |
+|----------|--------|
+| ⌃ T | Transfer output to agent |
+| ⌃ B | Background session |
+| ⌃ Q | Open session menu |
+| ⌘ W | Open session menu |
+
 ### Split Panes
 
 | Shortcut | Action |

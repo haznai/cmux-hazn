@@ -141,6 +141,29 @@ final class KeyboardShortcutContextTests: XCTestCase {
         XCTAssertEqual(KeyboardShortcutSettings.Action.toggleReactGrab.shortcutContext, .application)
     }
 
+    func testPiOverlayShortcutsAreScopedAwayFromNormalCloseTab() {
+        let overlayCloseMenu = KeyboardShortcutSettings.Action.piHaznOverlayCloseMenu.defaultShortcut
+        let normalCloseTab = KeyboardShortcutSettings.Action.closeTab.defaultShortcut
+
+        XCTAssertEqual(overlayCloseMenu, normalCloseTab)
+        XCTAssertEqual(KeyboardShortcutSettings.Action.piHaznOverlayCloseMenu.shortcutContext, .piHaznOverlay)
+        XCTAssertFalse(
+            KeyboardShortcutSettings.Action.piHaznOverlayCloseMenu.conflicts(
+                with: normalCloseTab,
+                proposedAction: .closeTab,
+                configuredShortcut: overlayCloseMenu
+            ),
+            "The overlay-owned Cmd+W menu shortcut must coexist with normal Close Tab outside Pi overlays"
+        )
+        XCTAssertFalse(
+            KeyboardShortcutSettings.Action.closeTab.conflicts(
+                with: overlayCloseMenu,
+                proposedAction: .piHaznOverlayCloseMenu,
+                configuredShortcut: normalCloseTab
+            )
+        )
+    }
+
     func testShortcutSettingsFilePreservesConfiguredShortcutWithoutGlobalConflictLookup() throws {
         let directoryURL = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directoryURL) }
