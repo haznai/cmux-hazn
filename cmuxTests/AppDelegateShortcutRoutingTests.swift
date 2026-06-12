@@ -5448,6 +5448,95 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         }
     }
 
+    func testPiHaznAttachedOverlayMenuShortcutSupportsChordRemap() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let window = window(withId: windowId),
+              let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let paneId = workspace.bonsplitController.focusedPaneId,
+              let overlayPanel = workspace.newOverlayTerminalSurface(
+                overPane: paneId,
+                focus: true,
+                piHaznShellControls: true
+              ) else {
+            XCTFail("Expected focused Pi hazn overlay surface")
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        overlayPanel.hostedView.setVisibleInUI(true)
+        overlayPanel.hostedView.setActive(true)
+        XCTAssertTrue(workspace.focusAttachedOverlaySurface(overlayPanel.id))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        let chordedMenuShortcut = StoredShortcut(
+            key: "m",
+            command: false,
+            shift: false,
+            option: false,
+            control: true,
+            keyCode: 46,
+            chordKey: "x",
+            chordCommand: false,
+            chordShift: false,
+            chordOption: false,
+            chordControl: false,
+            chordKeyCode: 7
+        )
+
+        withTemporaryShortcut(action: .piHaznOverlayMenu, shortcut: chordedMenuShortcut) {
+            var requestedShortcut: String?
+#if DEBUG
+            appDelegate.debugPiHaznOverlayMenuChoiceHandler = { shortcut, _ in
+                requestedShortcut = shortcut
+                return nil
+            }
+#endif
+
+            guard let prefixEvent = makeKeyDownEvent(
+                key: "m",
+                modifiers: [.control],
+                keyCode: 46,
+                windowNumber: window.windowNumber
+            ), let suffixEvent = makeKeyDownEvent(
+                key: "x",
+                modifiers: [],
+                keyCode: 7,
+                windowNumber: window.windowNumber
+            ) else {
+                XCTFail("Failed to construct chord events")
+                return
+            }
+
+#if DEBUG
+            XCTAssertTrue(
+                appDelegate.debugHandleCustomShortcut(event: prefixEvent),
+                "The remapped Pi overlay chord prefix should be armed and consumed before it reaches the overlay PTY/browser"
+            )
+#else
+            XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+            XCTAssertNil(requestedShortcut, "Chord prefix alone must not open the lifecycle menu")
+
+#if DEBUG
+            XCTAssertTrue(appDelegate.debugHandleCustomShortcut(event: suffixEvent))
+#else
+            XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+            XCTAssertEqual(requestedShortcut, "ctrl+m x")
+            XCTAssertEqual(workspace.attachedOverlaySurface?.id, overlayPanel.id)
+            XCTAssertNotNil(workspace.panels[overlayPanel.id])
+        }
+    }
+
     func testPlainWPassesThroughFocusedPiHaznAttachedOverlay() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")

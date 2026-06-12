@@ -3615,7 +3615,7 @@ class TerminalController {
             }
         }
 
-        let focusedPaneId = workspace.bonsplitController.focusedPaneId
+        let focusedPaneId = workspace.focusedPaneIdIncludingAttachedOverlay()
         let panes: [[String: Any]] = paneIds.enumerated().map { paneIndex, paneId in
             let tabs = workspace.bonsplitController.tabs(inPane: paneId)
             let surfaceUUIDs: [UUID] = tabs.compactMap { workspace.panelIdFromSurfaceId($0.id) }
@@ -3784,7 +3784,7 @@ class TerminalController {
             }
         }
 
-        let focusedPaneId = workspace.bonsplitController.focusedPaneId
+        let focusedPaneId = workspace.focusedPaneIdIncludingAttachedOverlay()
         let panes: [[String: Any]] = paneIds.enumerated().map { paneIndex, paneId in
             let paneSurfaces = surfacesByPane[paneId.id] ?? []
             let surfaceUUIDs: [UUID] = paneSurfaces.compactMap { surface in
@@ -7432,7 +7432,7 @@ class TerminalController {
         v2MainSync {
             guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else { return }
 
-            let focusedPaneId = ws.bonsplitController.focusedPaneId
+            let focusedPaneId = ws.focusedPaneIdIncludingAttachedOverlay()
             let snapshot = ws.bonsplitController.layoutSnapshot()
             let geometryByPaneId = Dictionary(
                 snapshot.panes.map { ($0.paneId, $0.frame) },
@@ -16017,7 +16017,7 @@ class TerminalController {
             }
 
             let paneIds = tab.bonsplitController.allPaneIds
-            let focusedPaneId = tab.bonsplitController.focusedPaneId
+            let focusedPaneId = tab.focusedPaneIdIncludingAttachedOverlay()
 
             let lines = paneIds.enumerated().map { index, paneId in
                 let selected = paneId == focusedPaneId ? "*" : " "

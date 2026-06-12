@@ -602,13 +602,16 @@ if [[ -x "$CLI_PATH" ]]; then
   fi
 fi
 
-# Build cmuxd and ensure helper binaries are present (needed for both launch and no-launch).
+# Build cmuxd when this checkout includes its source, then ensure a helper is bundled.
 CMUXD_SRC="$PWD/cmuxd/zig-out/bin/cmuxd"
 if [[ -d "$PWD/cmuxd" ]]; then
   if command -v zig >/dev/null 2>&1; then
     (cd "$PWD/cmuxd" && zig build -Doptimize=ReleaseFast)
+  elif [[ ! -x "$CMUXD_SRC" ]]; then
+    echo "error: zig is required to build cmuxd, and no existing helper was found at $CMUXD_SRC" >&2
+    exit 1
   else
-    echo "Skipping cmuxd zig build because zig is not installed"
+    echo "Preserving existing cmuxd helper because zig is not installed: $CMUXD_SRC"
   fi
 fi
 if [[ -d "$PWD/ghostty" ]]; then
@@ -623,7 +626,11 @@ if [[ -d "$PWD/ghostty" ]]; then
     "$PWD/scripts/build-ghostty-cli-helper.sh" --output "$GHOSTTY_HELPER_DEST"
   fi
 fi
-if [[ -x "$CMUXD_SRC" ]]; then
+if [[ -d "$PWD/cmuxd" ]]; then
+  if [[ ! -x "$CMUXD_SRC" ]]; then
+    echo "error: cmuxd helper was not produced at $CMUXD_SRC" >&2
+    exit 1
+  fi
   BIN_DIR="$APP_PATH/Contents/Resources/bin"
   mkdir -p "$BIN_DIR"
   cp "$CMUXD_SRC" "$BIN_DIR/cmuxd"

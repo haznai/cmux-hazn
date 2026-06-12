@@ -3279,6 +3279,43 @@ final class WorkspaceAttachedOverlayRoutingTests: XCTestCase {
         XCTAssertEqual(workspace.backgroundedAttachedOverlaySurfaces[secondOverlay.id]?.isVisible, false)
     }
 
+    func testBackgroundingFocusedOverlayDoesNotStealPaneFocusToAnchor() {
+        let workspace = Workspace()
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId),
+              let secondPanel = workspace.newTerminalSplit(from: sourcePanelId, orientation: .horizontal, focus: false),
+              let secondPaneId = workspace.paneId(forPanelId: secondPanel.id) else {
+            XCTFail("Expected split workspace")
+            return
+        }
+
+        workspace.focusPane(secondPaneId)
+        XCTAssertEqual(workspace.bonsplitController.focusedPaneId?.id, secondPaneId.id)
+        XCTAssertEqual(workspace.focusedPanelId, secondPanel.id)
+
+        guard let overlayPanel = workspace.newOverlayTerminalSurface(
+            overPane: sourcePaneId,
+            focus: true
+        ) else {
+            XCTFail("Expected attached overlay")
+            return
+        }
+
+        XCTAssertEqual(workspace.focusedPanelId, overlayPanel.id)
+        XCTAssertEqual(workspace.bonsplitController.focusedPaneId?.id, secondPaneId.id)
+
+        XCTAssertTrue(workspace.backgroundAttachedOverlaySurface(overlayPanel.id))
+
+        XCTAssertEqual(
+            workspace.bonsplitController.focusedPaneId?.id,
+            secondPaneId.id,
+            "Backgrounding an overlay is not a focus-intent action and must preserve the user's active pane"
+        )
+        XCTAssertEqual(workspace.focusedPanelId, secondPanel.id)
+        XCTAssertEqual(workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.isVisible, false)
+        XCTAssertEqual(workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.isFocused, false)
+    }
+
     func testClosingBackgroundedOverlayDoesNotStealPaneFocus() {
         let workspace = Workspace()
         guard let sourcePanelId = workspace.focusedPanelId,

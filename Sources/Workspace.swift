@@ -7194,6 +7194,16 @@ final class Workspace: Identifiable, ObservableObject {
         bonsplitController.selectedTab(inPane: paneId).flatMap { panelIdFromSurfaceId($0.id) }
     }
 
+    func focusedPaneIdIncludingAttachedOverlay() -> PaneID? {
+        if let overlay = attachedOverlaySurface,
+           overlay.isVisible,
+           overlay.isFocused,
+           panels[overlay.id] != nil {
+            return overlay.anchorPaneId
+        }
+        return bonsplitController.focusedPaneId
+    }
+
     func bonsplitSurfacePanelCount() -> Int {
         Set(surfaceIdToPanelId.values).filter { panels[$0] != nil }.count
     }
@@ -10961,7 +10971,6 @@ final class Workspace: Identifiable, ObservableObject {
             return false
         }
 
-        let wasCurrentVisibleOverlay = attachedOverlaySurface?.id == overlay.id && overlay.isVisible
         overlay.isFocused = false
         overlay.isVisible = false
         backgroundedAttachedOverlaySurfaces[overlay.id] = overlay
@@ -10969,15 +10978,6 @@ final class Workspace: Identifiable, ObservableObject {
             attachedOverlaySurface = overlay
         }
         hideAttachedOverlayPortalView(panel: panel, reason: "overlayBackground")
-
-        if wasCurrentVisibleOverlay {
-            if let selectedPanelId = effectiveSelectedPanelId(inPane: overlay.anchorPaneId),
-               panels[selectedPanelId] != nil {
-                focusPanel(selectedPanelId)
-            } else {
-                bonsplitController.focusPane(overlay.anchorPaneId)
-            }
-        }
         return true
     }
 

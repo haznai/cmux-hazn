@@ -12793,6 +12793,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let surfaceType: String
     }
 
+    private struct PiHaznOverlayShortcutContext {
+        let actionContext: PiHaznOverlayActionContext
+        let panel: any Panel
+        let window: NSWindow?
+    }
+
     private final class PiHaznOverlayMenuItemPayload: NSObject {
         let actionContext: PiHaznOverlayActionContext
         let shortcut: String
@@ -12805,14 +12811,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func piHaznOverlayShortcutAction(event: NSEvent) -> PiHaznOverlayShortcutMatch? {
-        let candidates: [(KeyboardShortcutSettings.Action, PiHaznOverlayShortcutIntent)] = [
+    private var piHaznOverlayShortcutCandidates: [(KeyboardShortcutSettings.Action, PiHaznOverlayShortcutIntent)] {
+        [
             (.piHaznOverlayTransfer, .action(.transfer)),
             (.piHaznOverlayBackground, .action(.background)),
             (.piHaznOverlayMenu, .menu),
             (.piHaznOverlayCloseMenu, .menu),
         ]
-        for (action, intent) in candidates {
+    }
+
+    private var piHaznOverlayShortcutActions: [KeyboardShortcutSettings.Action] {
+        piHaznOverlayShortcutCandidates.map(\.0)
+    }
+
+    private func piHaznOverlayShortcutAction(event: NSEvent) -> PiHaznOverlayShortcutMatch? {
+        for (action, intent) in piHaznOverlayShortcutCandidates {
             let shortcut = KeyboardShortcutSettings.shortcut(for: action)
             guard matchConfiguredShortcut(event: event, shortcut: shortcut) else { continue }
             return PiHaznOverlayShortcutMatch(intent: intent, shortcut: shortcut.configIdentifier)
@@ -12990,12 +13003,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         performPiHaznOverlayMenuChoice(payload.choice, shortcut: payload.shortcut, context: payload.actionContext)
     }
 
-    private func handlePiHaznOverlayShortcut(
+    private func piHaznOverlayShortcutContext(
         event: NSEvent,
         commandPaletteEffectiveInTargetWindow: Bool
-    ) -> Bool {
+    ) -> PiHaznOverlayShortcutContext? {
         guard !commandPaletteEffectiveInTargetWindow,
-              let shortcutMatch = piHaznOverlayShortcutAction(event: event),
               let context = preferredMainWindowContextForShortcuts(event: event),
               let workspaceId = context.tabManager.selectedTabId,
               let workspace = context.tabManager.tabs.first(where: { $0.id == workspaceId }),
@@ -13004,24 +13016,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
               overlay.isVisible,
               overlay.isFocused,
               let panel = workspace.panels[overlay.id] else {
-            return false
+            return nil
         }
 
-        let actionContext = piHaznOverlayActionContext(
-            workspace: workspace,
-            overlay: overlay,
+        return PiHaznOverlayShortcutContext(
+            actionContext: piHaznOverlayActionContext(
+                workspace: workspace,
+                overlay: overlay,
+                panel: panel,
+                windowId: context.windowId
+            ),
             panel: panel,
-            windowId: context.windowId
+            window: context.window
         )
+    }
+
+    private func handlePiHaznOverlayShortcut(
+        event: NSEvent,
+        commandPaletteEffectiveInTargetWindow: Bool
+    ) -> Bool {
+        guard let overlayContext = piHaznOverlayShortcutContext(
+            event: event,
+            commandPaletteEffectiveInTargetWindow: commandPaletteEffectiveInTargetWindow
+        ) else { return false }
+
+        if activeConfiguredShortcutChordPrefixForCurrentEvent == nil,
+           armConfiguredShortcutChordIfNeeded(
+            event: event,
+            actions: piHaznOverlayShortcutActions
+           ) {
+            return true
+        }
+
+        guard let shortcutMatch = piHaznOverlayShortcutAction(event: event) else { return false }
 
         switch shortcutMatch.intent {
         case .action(let action):
-            return performPiHaznOverlayAction(action, shortcut: shortcutMatch.shortcut, context: actionContext)
+            return performPiHaznOverlayAction(action, shortcut: shortcutMatch.shortcut, context: overlayContext.actionContext)
         case .menu:
             return presentPiHaznOverlayLifecycleMenu(
                 shortcut: shortcutMatch.shortcut,
-                context: actionContext,
-                anchorView: piHaznOverlayMenuAnchorView(panel: panel, window: context.window)
+                context: overlayContext.actionContext,
+                anchorView: piHaznOverlayMenuAnchorView(panel: overlayContext.panel, window: overlayContext.window)
             )
         }
     }

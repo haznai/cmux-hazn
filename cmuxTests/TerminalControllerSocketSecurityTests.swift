@@ -906,14 +906,29 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
 
         guard let basePanelId = workspace.focusedPanelId,
               let basePaneId = workspace.paneId(forPanelId: basePanelId),
-              let overlayPanel = workspace.newOverlayTerminalSurface(
-                overPane: basePaneId,
-                focus: true,
-                piHaznShellControls: true
-              ) else {
+              let secondPanel = workspace.newTerminalSplit(from: basePanelId, orientation: .horizontal, focus: false),
+              let secondPaneId = workspace.paneId(forPanelId: secondPanel.id) else {
+            XCTFail("Expected split workspace")
+            return
+        }
+
+        workspace.focusPane(secondPaneId)
+        XCTAssertEqual(workspace.bonsplitController.focusedPaneId?.id, secondPaneId.id)
+
+        guard let overlayPanel = workspace.newOverlayTerminalSurface(
+            overPane: basePaneId,
+            focus: true,
+            piHaznShellControls: true
+        ) else {
             XCTFail("Expected focused attached overlay")
             return
         }
+        XCTAssertEqual(workspace.focusedPanelId, overlayPanel.id)
+        XCTAssertEqual(
+            workspace.bonsplitController.focusedPaneId?.id,
+            secondPaneId.id,
+            "Focusing an attached overlay should not mutate Bonsplit pane focus"
+        )
 
         TerminalController.shared.start(
             tabManager: manager,
@@ -934,8 +949,11 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         let surfaceIds = try XCTUnwrap(panePayload["surface_ids"] as? [String])
         XCTAssertTrue(surfaceIds.contains(basePanelId.uuidString))
         XCTAssertTrue(surfaceIds.contains(overlayPanel.id.uuidString), "pane.list must expose visible overlays anchored to the pane")
+        XCTAssertEqual(panePayload["focused"] as? Bool, true, "Focused overlays should make their anchor pane the focused pane in pane.list")
         XCTAssertEqual(panePayload["surface_count"] as? Int, 2)
         XCTAssertEqual(panePayload["selected_surface_id"] as? String, overlayPanel.id.uuidString)
+        let secondPanePayload = try XCTUnwrap(panes.first { ($0["id"] as? String) == secondPaneId.id.uuidString })
+        XCTAssertEqual(secondPanePayload["focused"] as? Bool, false)
 
         let surfacesResponse = try await sendV2RequestAsync(
             method: "pane.surfaces",
