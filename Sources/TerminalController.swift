@@ -3739,8 +3739,12 @@ class TerminalController {
         var surfacesByPane: [UUID: [[String: Any]]] = [:]
         let focusedSurfaceId = workspace.focusedPanelId
         for (surfaceIndex, panel) in orderedPanels(in: workspace).enumerated() {
-            let paneUUID = paneByPanelId[panel.id]
+            let overlayMetadata = workspace.attachedOverlayMetadata(forPanelId: panel.id)
+            let isAttachedOverlay = overlayMetadata != nil
+            let overlayVisible = overlayMetadata?.isVisible ?? true
+            let paneUUID = paneByPanelId[panel.id] ?? workspace.paneId(forPanelId: panel.id)?.id
             let selectedInPane = selectedInPaneByPanelId[panel.id] ?? false
+            let selectedInTree = selectedInPane || (overlayMetadata?.isVisible == true && overlayMetadata?.isFocused == true)
 
             var item: [String: Any] = [
                 "id": panel.id.uuidString,
@@ -3749,8 +3753,10 @@ class TerminalController {
                 "type": panel.panelType.rawValue,
                 "title": workspace.panelTitle(panelId: panel.id) ?? panel.displayTitle,
                 "focused": panel.id == focusedSurfaceId,
-                "selected": selectedInPane,
+                "selected": selectedInTree,
                 "selected_in_pane": v2OrNull(selectedInPaneByPanelId[panel.id]),
+                "placement": isAttachedOverlay ? "overlay" : "split",
+                "visible": overlayVisible,
                 "pane_id": v2OrNull(paneUUID?.uuidString),
                 "pane_ref": v2Ref(kind: .pane, uuid: paneUUID),
                 "index_in_pane": v2OrNull(indexInPaneByPanelId[panel.id]),
@@ -3761,6 +3767,9 @@ class TerminalController {
                 item["url"] = browserPanel.currentURL?.absoluteString ?? ""
             } else {
                 item["url"] = NSNull()
+            }
+            if isAttachedOverlay {
+                item["pi_hazn_shell_controls"] = overlayMetadata?.piHaznShellControls ?? false
             }
             if let paneUUID {
                 surfacesByPane[paneUUID, default: []].append(item)
@@ -3777,10 +3786,20 @@ class TerminalController {
 
         let focusedPaneId = workspace.bonsplitController.focusedPaneId
         let panes: [[String: Any]] = paneIds.enumerated().map { paneIndex, paneId in
-            let tabs = workspace.bonsplitController.tabs(inPane: paneId)
-            let surfaceUUIDs: [UUID] = tabs.compactMap { workspace.panelIdFromSurfaceId($0.id) }
+            let paneSurfaces = surfacesByPane[paneId.id] ?? []
+            let surfaceUUIDs: [UUID] = paneSurfaces.compactMap { surface in
+                guard let rawId = surface["id"] as? String else { return nil }
+                return UUID(uuidString: rawId)
+            }
             let selectedTab = workspace.bonsplitController.selectedTab(inPane: paneId)
-            let selectedSurfaceUUID = selectedTab.flatMap { workspace.panelIdFromSurfaceId($0.id) }
+            let selectedSplitSurfaceUUID = selectedTab.flatMap { workspace.panelIdFromSurfaceId($0.id) }
+            let selectedOverlaySurfaceUUID = workspace.attachedOverlaySurface.flatMap { overlay -> UUID? in
+                guard overlay.anchorPaneId == paneId,
+                      overlay.isVisible,
+                      overlay.isFocused else { return nil }
+                return overlay.id
+            }
+            let selectedSurfaceUUID = selectedOverlaySurfaceUUID ?? selectedSplitSurfaceUUID
 
             return [
                 "id": paneId.id.uuidString,
@@ -3792,7 +3811,7 @@ class TerminalController {
                 "selected_surface_id": v2OrNull(selectedSurfaceUUID?.uuidString),
                 "selected_surface_ref": v2Ref(kind: .surface, uuid: selectedSurfaceUUID),
                 "surface_count": surfaceUUIDs.count,
-                "surfaces": surfacesByPane[paneId.id] ?? []
+                "surfaces": paneSurfaces
             ]
         }
 

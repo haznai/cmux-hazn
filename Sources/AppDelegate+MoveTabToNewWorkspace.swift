@@ -14,10 +14,11 @@ extension AppDelegate {
     func canMoveSurfaceToNewWorkspace(panelId: UUID) -> Bool {
         guard let source = locateSurface(surfaceId: panelId),
               let sourceWorkspace = source.tabManager.tabs.first(where: { $0.id == source.workspaceId }),
-              sourceWorkspace.panels[panelId] != nil else {
+              sourceWorkspace.panels[panelId] != nil,
+              sourceWorkspace.surfaceIdFromPanelId(panelId) != nil else {
             return false
         }
-        return sourceWorkspace.panels.count > 1
+        return sourceWorkspace.bonsplitSurfacePanelCount() > 1
     }
 
     func canMoveBonsplitTabToNewWorkspace(tabId: UUID) -> Bool {
@@ -71,7 +72,8 @@ extension AppDelegate {
         guard let source = locateSurface(surfaceId: panelId),
               let sourceWorkspace = source.tabManager.tabs.first(where: { $0.id == source.workspaceId }),
               let sourcePanel = sourceWorkspace.panels[panelId],
-              sourceWorkspace.panels.count > 1 else {
+              sourceWorkspace.surfaceIdFromPanelId(panelId) != nil,
+              sourceWorkspace.bonsplitSurfacePanelCount() > 1 else {
             return nil
         }
 

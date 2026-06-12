@@ -24,10 +24,11 @@ extension TerminalController {
         workspace: Workspace,
         surfaceId: UUID
     ) -> V2CallResult {
-        guard workspace.panels.count > 1 else {
+        guard workspace.surfaceIdFromPanelId(surfaceId) != nil,
+              workspace.bonsplitSurfacePanelCount() > 1 else {
             return .err(
                 code: "invalid_state",
-                message: "Tab cannot be moved to a new workspace because it is the only tab in its workspace",
+                message: "Tab cannot be moved to a new workspace because it is the only split tab in its workspace",
                 data: nil
             )
         }

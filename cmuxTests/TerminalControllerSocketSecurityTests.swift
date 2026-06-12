@@ -653,6 +653,137 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         XCTAssertEqual(focused["placement"] as? String, "overlay")
     }
 
+    func testSystemTreeIncludesFocusedOverlayInAnchorPaneSurfaces() async throws {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let socketPath = makeSocketPath("tree-overlay")
+#if DEBUG
+        let previousCloseHandler = appDelegate.debugCloseMainWindowConfirmationHandler
+        appDelegate.debugCloseMainWindowConfirmationHandler = { _ in true }
+#endif
+        let windowId = appDelegate.createMainWindow()
+        defer {
+            TerminalController.shared.stop()
+            _ = appDelegate.closeMainWindow(windowId: windowId)
+#if DEBUG
+            appDelegate.debugCloseMainWindowConfirmationHandler = previousCloseHandler
+#endif
+        }
+
+        guard let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let basePanelId = workspace.focusedPanelId,
+              let secondPanel = workspace.newTerminalSplit(from: basePanelId, orientation: .horizontal),
+              let overlayAnchorPaneId = workspace.paneId(forPanelId: secondPanel.id) else {
+            XCTFail("Expected split workspace for overlay tree test")
+            return
+        }
+
+        guard let overlayPanel = workspace.newOverlayTerminalSurface(
+            overPane: overlayAnchorPaneId,
+            focus: true,
+            piHaznShellControls: true
+        ) else {
+            XCTFail("Expected focused attached overlay surface")
+            return
+        }
+
+        TerminalController.shared.start(
+            tabManager: manager,
+            socketPath: socketPath,
+            accessMode: .allowAll
+        )
+        try waitForSocket(at: socketPath)
+
+        let response = try await sendV2RequestAsync(
+            method: "system.tree",
+            params: ["workspace_id": workspace.id.uuidString],
+            to: socketPath
+        )
+
+        XCTAssertEqual(response["ok"] as? Bool, true, "Unexpected JSON-RPC response: \(response)")
+        let result = try XCTUnwrap(response["result"] as? [String: Any], "Unexpected JSON-RPC response: \(response)")
+        let windows = try XCTUnwrap(result["windows"] as? [[String: Any]])
+        let window = try XCTUnwrap(windows.first)
+        let workspaces = try XCTUnwrap(window["workspaces"] as? [[String: Any]])
+        let workspaceNode = try XCTUnwrap(workspaces.first)
+        let panes = try XCTUnwrap(workspaceNode["panes"] as? [[String: Any]])
+        let anchorPane = try XCTUnwrap(panes.first { $0["id"] as? String == overlayAnchorPaneId.id.uuidString })
+        let surfaceIds = try XCTUnwrap(anchorPane["surface_ids"] as? [String])
+        XCTAssertTrue(surfaceIds.contains(overlayPanel.id.uuidString))
+        XCTAssertEqual(anchorPane["selected_surface_id"] as? String, overlayPanel.id.uuidString)
+
+        let surfaces = try XCTUnwrap(anchorPane["surfaces"] as? [[String: Any]])
+        let overlaySurface = try XCTUnwrap(surfaces.first { $0["id"] as? String == overlayPanel.id.uuidString })
+        XCTAssertEqual(overlaySurface["placement"] as? String, "overlay")
+        XCTAssertEqual(overlaySurface["visible"] as? Bool, true)
+        XCTAssertEqual(overlaySurface["focused"] as? Bool, true)
+        XCTAssertEqual(overlaySurface["selected"] as? Bool, true)
+        XCTAssertEqual(overlaySurface["pane_id"] as? String, overlayAnchorPaneId.id.uuidString)
+        XCTAssertEqual(overlaySurface["pi_hazn_shell_controls"] as? Bool, true)
+    }
+
+    func testMoveToNewWorkspaceRejectsOnlySplitSurfaceWhenOverlayExists() async throws {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let socketPath = makeSocketPath("move-overlay")
+#if DEBUG
+        let previousCloseHandler = appDelegate.debugCloseMainWindowConfirmationHandler
+        appDelegate.debugCloseMainWindowConfirmationHandler = { _ in true }
+#endif
+        let windowId = appDelegate.createMainWindow()
+        defer {
+            TerminalController.shared.stop()
+            _ = appDelegate.closeMainWindow(windowId: windowId)
+#if DEBUG
+            appDelegate.debugCloseMainWindowConfirmationHandler = previousCloseHandler
+#endif
+        }
+
+        guard let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let basePanelId = workspace.focusedPanelId,
+              let basePaneId = workspace.paneId(forPanelId: basePanelId),
+              let overlayPanel = workspace.newOverlayTerminalSurface(overPane: basePaneId, focus: true) else {
+            XCTFail("Expected one split surface plus one attached overlay")
+            return
+        }
+
+        XCTAssertEqual(workspace.bonsplitSurfacePanelCount(), 1)
+        XCTAssertEqual(workspace.panels.count, 2)
+        XCTAssertTrue(workspace.isAttachedOverlaySurface(overlayPanel.id))
+
+        TerminalController.shared.start(
+            tabManager: manager,
+            socketPath: socketPath,
+            accessMode: .allowAll
+        )
+        try waitForSocket(at: socketPath)
+
+        let response = try await sendV2RequestAsync(
+            method: "surface.action",
+            params: [
+                "workspace_id": workspace.id.uuidString,
+                "surface_id": basePanelId.uuidString,
+                "action": "move_to_new_workspace"
+            ],
+            to: socketPath
+        )
+
+        XCTAssertEqual(response["ok"] as? Bool, false, "Unexpected JSON-RPC response: \(response)")
+        let error = try XCTUnwrap(response["error"] as? [String: Any], "Expected invalid-state response")
+        XCTAssertEqual(error["code"] as? String, "invalid_state")
+        XCTAssertNotNil(workspace.panels[basePanelId])
+        XCTAssertNotNil(workspace.panels[overlayPanel.id])
+        XCTAssertEqual(workspace.bonsplitSurfacePanelCount(), 1)
+    }
+
     func testSurfaceRelayRPCsRejectExplicitUnknownSurfaceID() async throws {
         let socketPath = makeSocketPath("relay-invalid")
         let manager = TabManager()
