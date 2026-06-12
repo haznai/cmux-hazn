@@ -3279,6 +3279,38 @@ final class WorkspaceAttachedOverlayRoutingTests: XCTestCase {
         XCTAssertEqual(workspace.backgroundedAttachedOverlaySurfaces[secondOverlay.id]?.isVisible, false)
     }
 
+    func testExplicitCloseLastSplitSurfaceWithOverlayClosesWorkspace() {
+        let manager = TabManager()
+        let workspace = manager.addWorkspace(select: true)
+        _ = manager.addWorkspace(select: false)
+        manager.confirmCloseHandler = { _, _, _ in true }
+
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId),
+              let sourceSurfaceId = workspace.surfaceIdFromPanelId(sourcePanelId) else {
+            XCTFail("Expected initial focused split surface")
+            return
+        }
+        guard let overlayPanel = workspace.newOverlayTerminalSurface(
+            overPane: sourcePaneId,
+            focus: true
+        ) else {
+            XCTFail("Expected attached overlay terminal")
+            return
+        }
+
+        XCTAssertEqual(workspace.bonsplitSurfacePanelCount(), 1)
+        XCTAssertEqual(workspace.panels.count, 2)
+        XCTAssertTrue(workspace.isAttachedOverlaySurface(overlayPanel.id))
+
+        workspace.markExplicitClose(surfaceId: sourceSurfaceId)
+        XCTAssertFalse(workspace.closePanel(sourcePanelId))
+        XCTAssertFalse(
+            manager.tabs.contains(where: { $0.id == workspace.id }),
+            "Explicit tab-close of the last real split surface should close the workspace even when an overlay panel exists"
+        )
+    }
+
     func testOverlayReanchorsBeforeClosingAnchorPanesLastSplitSurface() {
         let workspace = Workspace()
         guard let sourcePanelId = workspace.focusedPanelId,

@@ -784,6 +784,117 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         XCTAssertEqual(workspace.bonsplitSurfacePanelCount(), 1)
     }
 
+    func testSurfaceFocusClearsFocusedOverlayState() async throws {
+        let socketPath = makeSocketPath("focus-overlay")
+        let manager = TabManager()
+        let workspace = manager.addWorkspace(select: true)
+
+        defer {
+            if manager.tabs.contains(where: { $0.id == workspace.id }) {
+                manager.closeWorkspace(workspace)
+            }
+        }
+
+        guard let basePanelId = workspace.focusedPanelId,
+              let basePaneId = workspace.paneId(forPanelId: basePanelId),
+              let overlayPanel = workspace.newOverlayTerminalSurface(overPane: basePaneId, focus: true) else {
+            XCTFail("Expected focused attached overlay")
+            return
+        }
+
+        XCTAssertEqual(workspace.focusedPanelId, overlayPanel.id)
+        XCTAssertEqual(workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.isFocused, true)
+
+        TerminalController.shared.start(
+            tabManager: manager,
+            socketPath: socketPath,
+            accessMode: .allowAll
+        )
+        try waitForSocket(at: socketPath)
+
+        let focusResponse = try await sendV2RequestAsync(
+            method: "surface.focus",
+            params: [
+                "workspace_id": workspace.id.uuidString,
+                "surface_id": basePanelId.uuidString
+            ],
+            to: socketPath
+        )
+
+        XCTAssertEqual(focusResponse["ok"] as? Bool, true, "Unexpected JSON-RPC response: \(focusResponse)")
+        XCTAssertEqual(workspace.focusedPanelId, basePanelId)
+        XCTAssertEqual(workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.isFocused, false)
+        XCTAssertEqual(workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.isVisible, true)
+
+        let currentResponse = try await sendV2RequestAsync(
+            method: "surface.current",
+            params: ["workspace_id": workspace.id.uuidString],
+            to: socketPath
+        )
+        XCTAssertEqual(currentResponse["ok"] as? Bool, true, "Unexpected JSON-RPC response: \(currentResponse)")
+        let currentResult = try XCTUnwrap(currentResponse["result"] as? [String: Any])
+        XCTAssertEqual(currentResult["surface_id"] as? String, basePanelId.uuidString)
+        XCTAssertEqual(currentResult["placement"] as? String, "split")
+    }
+
+    func testMoveToNewWorkspaceReanchorsOverlayBeforeDetachingAnchorSurface() async throws {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let socketPath = makeSocketPath("move-anchor")
+#if DEBUG
+        let previousCloseHandler = appDelegate.debugCloseMainWindowConfirmationHandler
+        appDelegate.debugCloseMainWindowConfirmationHandler = { _ in true }
+#endif
+        let windowId = appDelegate.createMainWindow()
+        defer {
+            TerminalController.shared.stop()
+            _ = appDelegate.closeMainWindow(windowId: windowId)
+#if DEBUG
+            appDelegate.debugCloseMainWindowConfirmationHandler = previousCloseHandler
+#endif
+        }
+
+        guard let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let anchorPanelId = workspace.focusedPanelId,
+              let anchorPaneId = workspace.paneId(forPanelId: anchorPanelId),
+              let survivingPanel = workspace.newTerminalSplit(from: anchorPanelId, orientation: .horizontal, focus: false),
+              let survivingPaneId = workspace.paneId(forPanelId: survivingPanel.id),
+              let overlayPanel = workspace.newOverlayTerminalSurface(overPane: anchorPaneId, focus: true) else {
+            XCTFail("Expected split workspace with an overlay anchored to the moved surface pane")
+            return
+        }
+
+        XCTAssertEqual(workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.anchorPaneId.id, anchorPaneId.id)
+        XCTAssertEqual(workspace.bonsplitController.tabs(inPane: anchorPaneId).count, 1)
+
+        TerminalController.shared.start(
+            tabManager: manager,
+            socketPath: socketPath,
+            accessMode: .allowAll
+        )
+        try waitForSocket(at: socketPath)
+
+        let response = try await sendV2RequestAsync(
+            method: "surface.action",
+            params: [
+                "workspace_id": workspace.id.uuidString,
+                "surface_id": anchorPanelId.uuidString,
+                "action": "move_to_new_workspace"
+            ],
+            to: socketPath
+        )
+
+        XCTAssertEqual(response["ok"] as? Bool, true, "Unexpected JSON-RPC response: \(response)")
+        XCTAssertNotNil(workspace.panels[survivingPanel.id])
+        XCTAssertNotNil(workspace.panels[overlayPanel.id])
+        XCTAssertEqual(workspace.attachedOverlayMetadata(forPanelId: overlayPanel.id)?.anchorPaneId.id, survivingPaneId.id)
+        XCTAssertTrue(workspace.bonsplitController.allPaneIds.contains(survivingPaneId))
+    }
+
     func testPaneCreateRejectsUnknownPlacement() async throws {
         let socketPath = makeSocketPath("pane-placement")
         let manager = TabManager()

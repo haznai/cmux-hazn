@@ -10872,6 +10872,15 @@ final class Workspace: Identifiable, ObservableObject {
         }
     }
 
+    func clearAttachedOverlayFocusIfNeeded(except focusedPanelId: UUID? = nil) {
+        guard var overlay = attachedOverlaySurface,
+              overlay.isFocused,
+              overlay.id != focusedPanelId else { return }
+        overlay.isFocused = false
+        attachedOverlaySurface = overlay
+        panels[overlay.id]?.unfocus()
+    }
+
     @discardableResult
     func focusAttachedOverlaySurface(_ panelId: UUID) -> Bool {
         let existingOverlay = attachedOverlayMetadata(forPanelId: panelId)
@@ -10997,7 +11006,7 @@ final class Workspace: Identifiable, ObservableObject {
         return true
     }
 
-    private func reanchorAttachedOverlaysIfNeeded(beforeClosingSplitPanel panelId: UUID) {
+    func reanchorAttachedOverlaysIfNeeded(beforeClosingSplitPanel panelId: UUID) {
         guard let closingTabId = surfaceIdFromPanelId(panelId),
               let closingPane = paneId(forPanelId: panelId) else { return }
         let tabsInClosingPane = bonsplitController.tabs(inPane: closingPane)
@@ -11748,6 +11757,7 @@ final class Workspace: Identifiable, ObservableObject {
         // When a caller passes an explicit previousHostedView (e.g. during split creation where
         // bonsplit has already mutated focusedPaneId), prefer it over the derived value.
         let previousTerminalHostedView = previousHostedView ?? focusedTerminalPanel?.hostedView
+        clearAttachedOverlayFocusIfNeeded(except: panelId)
 
         // `selectTab` does not necessarily move bonsplit's focused pane. For programmatic focus
         // (socket API, notification click, etc.), ensure the target tab's pane becomes focused
@@ -13208,7 +13218,7 @@ extension Workspace: BonsplitDelegate {
     @MainActor
     private func shouldCloseWorkspaceOnLastSurface(for tabId: TabID) -> Bool {
         let manager = owningTabManager ?? AppDelegate.shared?.tabManagerFor(tabId: id) ?? AppDelegate.shared?.tabManager
-        guard panels.count <= 1,
+        guard bonsplitSurfacePanelCount() <= 1,
               panelIdFromSurfaceId(tabId) != nil,
               let manager,
               manager.tabs.contains(where: { $0.id == id }) else {

@@ -4591,7 +4591,8 @@ class TabManager: ObservableObject {
 
     private func shouldCloseWorkspaceOnLastSurfaceShortcut(_ workspace: Workspace, panelId: UUID) -> Bool {
         LastSurfaceCloseShortcutSettings.closesWorkspace() &&
-            workspace.panels.count <= 1 &&
+            workspace.bonsplitSurfacePanelCount() <= 1 &&
+            workspace.surfaceIdFromPanelId(panelId) != nil &&
             workspace.panels[panelId] != nil
     }
 

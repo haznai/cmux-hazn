@@ -87,6 +87,7 @@ extension AppDelegate {
         let sourcePane = sourceWorkspace.paneId(forPanelId: panelId)
         let sourceIndex = sourceWorkspace.indexInPane(forPanelId: panelId)
         let activationIntent = focusIntentForNewWorkspaceMove(panel: sourcePanel)
+        sourceWorkspace.reanchorAttachedOverlaysIfNeeded(beforeClosingSplitPanel: panelId)
         guard let detached = sourceWorkspace.detachSurface(panelId: panelId) else { return nil }
 
         guard let destinationWorkspace = targetManager.addWorkspace(
