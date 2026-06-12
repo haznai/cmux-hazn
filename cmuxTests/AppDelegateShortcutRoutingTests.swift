@@ -5360,6 +5360,62 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         XCTAssertTrue(window.isVisible, "Cmd+W must not close the cmux window while a Pi overlay owns it")
     }
 
+    func testPlainWPassesThroughFocusedPiHaznAttachedOverlay() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let window = window(withId: windowId),
+              let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let paneId = workspace.bonsplitController.focusedPaneId,
+              let overlayPanel = workspace.newOverlayTerminalSurface(
+                overPane: paneId,
+                focus: true,
+                piHaznShellControls: true
+              ) else {
+            XCTFail("Expected focused Pi hazn overlay surface")
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        overlayPanel.hostedView.setVisibleInUI(true)
+        overlayPanel.hostedView.setActive(true)
+        XCTAssertTrue(workspace.focusAttachedOverlaySurface(overlayPanel.id))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+#if DEBUG
+        appDelegate.debugPiHaznOverlayMenuChoiceHandler = { _, _ in
+            XCTFail("Plain W must not open the Pi overlay lifecycle menu")
+            return nil
+        }
+#endif
+
+        guard let event = makeKeyDownEvent(
+            key: "w",
+            modifiers: [],
+            keyCode: 13,
+            windowNumber: window.windowNumber
+        ) else {
+            XCTFail("Failed to construct plain W event")
+            return
+        }
+
+#if DEBUG
+        XCTAssertFalse(appDelegate.debugHandleCustomShortcut(event: event))
+#else
+        XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+
+        XCTAssertEqual(workspace.attachedOverlaySurface?.id, overlayPanel.id)
+        XCTAssertNotNil(workspace.panels[overlayPanel.id])
+    }
+
     func testCtrlQPiHaznAttachedOverlayMenuKillChoiceClosesOnlyOverlay() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")

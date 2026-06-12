@@ -12821,8 +12821,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
             return nil
         }
-        if normalizedFlags == .command, lowered == "w" || event.keyCode == 13 {
-            return PiHaznOverlayShortcutMatch(intent: .menu, shortcut: "cmd+w")
+        if normalizedFlags == .command {
+            if lowered == "w" || event.keyCode == 13 {
+                return PiHaznOverlayShortcutMatch(intent: .menu, shortcut: "cmd+w")
+            }
         }
         return nil
     }
